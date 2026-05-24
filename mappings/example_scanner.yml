@@ -1,0 +1,69 @@
+# 示例：自定义工具 YAML 字段映射
+# 将本文件复制为 mappings/你的工具名.yml 并按实际报告调整
+
+tool_name: example_scanner
+format: auto   # auto | json | csv | xml | md
+
+match:
+  filename_contains: ["example", "demo"]
+  content_contains: ["ExampleScanner"]
+
+# JSON 报告：指定漏洞数组路径 + 字段别名
+json:
+  record_paths:
+    - ["findings"]
+    - ["data", "vulnerabilities"]
+  fields:
+    vuln_name: [name, title, VUL_NAME]
+    severity: [severity, risk, SEVERITY]
+    asset_ip: [host, ip, target]
+    port: [port]
+    url: [url, VUL_URL, matched-at]
+    description: [description, DESCRIPTION]
+    solution: [solution, remediation, SOLUTION]
+    cve: [cve, CVE]
+    plugin_id: [plugin_id, template-id]
+
+# CSV 报告：列名映射（支持多个候选列名）
+csv:
+  columns:
+    vuln_name: ["Vulnerability", "Name", "漏洞名称"]
+    severity: ["Severity", "Risk", "风险"]
+    asset_ip: ["Target", "Host", "IP Address"]
+    port: ["Port"]
+    url: ["URL", "Affected URL"]
+    description: ["Description"]
+    solution: ["Recommendation", "Solution"]
+    cve: ["CVE"]
+
+# XML 报告：记录节点 XPath + 子节点/属性映射
+xml:
+  record_xpath: ".//issue"
+  fields:
+    vuln_name: [name, title]
+    severity: [severity, risk]
+    asset_ip: ["@host", host]
+    port: ["@port", port]
+    url: [path, url]
+    description: [issueDetail, description]
+    solution: [remediationDetail, solution]
+
+# Markdown 报告：章节/表格字段别名
+md:
+  section_level: 2          # 从 ## 级标题开始切分漏洞章节
+  skip_titles: ["概述", "summary", "目录"]
+  fields:
+    vuln_name: [漏洞名称, 名称, name]
+    severity: [级别, severity, 风险]
+    asset_ip: [主机, 目标, host, target]
+    port: [端口, port]
+    url: [url, 链接, link]
+    description: [描述, 详情, description]
+    solution: [修复建议, 修复, solution, remediation]
+  table_columns:
+    vuln_name: [漏洞名称, 名称, Vulnerability]
+    severity: [级别, Severity, 风险]
+    asset_ip: [目标主机, 主机, Host, Target]
+    port: [端口, Port]
+    description: [描述, Description]
+    solution: [修复建议, Solution, Recommendation]

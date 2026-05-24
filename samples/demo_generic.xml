@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<scanReport tool="DemoScanner">
+  <findings>
+    <finding>
+      <title>SQL Injection</title>
+      <risk>High</risk>
+      <host>10.0.0.5</host>
+      <port>8080</port>
+      <url>http://10.0.0.5:8080/login</url>
+      <description>User input not sanitized</description>
+      <solution>Use parameterized queries</solution>
+      <cve>CVE-2024-0001</cve>
+    </finding>
+    <finding>
+      <title>X-Frame-Options Missing</title>
+      <risk>Low</risk>
+      <host>10.0.0.5</host>
+      <port>8080</port>
+      <url>http://10.0.0.5:8080/</url>
+      <description>Clickjacking possible</description>
+      <solution>Add X-Frame-Options header</solution>
+    </finding>
+  </findings>
+</scanReport>

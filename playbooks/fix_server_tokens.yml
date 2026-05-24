@@ -1,0 +1,40 @@
+---
+- name: 隐藏 Web 服务器版本信息
+  hosts: all
+  become: yes
+  tasks:
+    - name: Apache ServerTokens Prod / ServerSignature Off
+      lineinfile:
+        path: "{{ item }}"
+        regexp: "^\\s*ServerTokens"
+        line: "ServerTokens Prod"
+        create: no
+      loop:
+        - /etc/apache2/conf-available/security.conf
+        - /etc/httpd/conf/httpd.conf
+      failed_when: false
+
+    - name: Apache ServerSignature Off
+      lineinfile:
+        path: /etc/apache2/conf-available/security.conf
+        regexp: "^\\s*ServerSignature"
+        line: "ServerSignature Off"
+      failed_when: false
+
+    - name: Nginx server_tokens off
+      lineinfile:
+        path: /etc/nginx/nginx.conf
+        regexp: "\\s*server_tokens"
+        line: "    server_tokens off;"
+        insertafter: "http \\{"
+      failed_when: false
+
+    - name: 重载 Web 服务
+      service:
+        name: "{{ item }}"
+        state: reloaded
+      loop:
+        - apache2
+        - httpd
+        - nginx
+      failed_when: false

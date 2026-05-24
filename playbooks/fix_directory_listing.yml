@@ -1,0 +1,27 @@
+---
+- name: 关闭目录浏览
+  hosts: all
+  become: yes
+  tasks:
+    - name: Apache - 全局关闭 Indexes
+      lineinfile:
+        path: /etc/apache2/apache2.conf
+        regexp: "Options Indexes"
+        line: "Options -Indexes"
+      failed_when: false
+
+    - name: Apache - conf-available 片段
+      copy:
+        dest: /etc/apache2/conf-available/rayscan-no-index.conf
+        content: |
+          <Directory /var/www/>
+            Options -Indexes
+          </Directory>
+      failed_when: false
+
+    - name: Nginx autoindex off
+      lineinfile:
+        path: /etc/nginx/nginx.conf
+        regexp: "autoindex"
+        line: "    autoindex off;"
+      failed_when: false

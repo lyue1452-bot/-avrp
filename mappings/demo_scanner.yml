@@ -1,0 +1,26 @@
+tool_name: demo_scanner
+format: auto
+
+match:
+  filename_contains: ["demo_generic"]
+
+csv:
+  columns:
+    vuln_name: ["Vulnerability"]
+    severity: ["Severity"]
+    asset_ip: ["Target"]
+    port: ["Port"]
+    description: ["Description"]
+    solution: ["Recommendation"]
+
+xml:
+  record_xpath: ".//finding"
+  fields:
+    vuln_name: [title, name]
+    severity: [risk, severity]
+    asset_ip: [host]
+    port: [port]
+    url: [url]
+    description: [description]
+    solution: [solution]
+    cve: [cve]

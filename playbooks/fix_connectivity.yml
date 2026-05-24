@@ -1,0 +1,17 @@
+---
+- name: 目标连通性检查
+  hosts: all
+  gather_facts: no
+  tasks:
+    - name: Ping 检测
+      ping:
+
+    - name: 检查 80 端口
+      wait_for:
+        port: 80
+        timeout: 5
+      failed_when: false
+
+    - name: 结果
+      debug:
+        msg: "主机 {{ inventory_hostname }} 连通正常；该漏洞类型需人工修复"

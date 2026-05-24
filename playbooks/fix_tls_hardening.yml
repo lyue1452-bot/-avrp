@@ -1,0 +1,23 @@
+---
+- name: TLS 基础加固（禁用 SSLv3/TLS1.0/1.1）
+  hosts: all
+  become: yes
+  tasks:
+    - name: Apache SSL 协议
+      copy:
+        dest: /etc/apache2/conf-available/rayscan-tls.conf
+        content: |
+          SSLProtocol all -SSLv3 -TLSv1 -TLSv1.1
+          SSLHonorCipherOrder on
+      failed_when: false
+
+    - name: Nginx ssl_protocols
+      lineinfile:
+        path: /etc/nginx/nginx.conf
+        regexp: "ssl_protocols"
+        line: "    ssl_protocols TLSv1.2 TLSv1.3;"
+      failed_when: false
+
+    - name: 说明
+      debug:
+        msg: "TLS 加固需配合有效证书；请使用 certbot 或企业 CA 部署 HTTPS"

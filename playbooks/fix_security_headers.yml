@@ -1,0 +1,71 @@
+---
+- name: 配置 HTTP 安全响应头（Apache/Nginx）
+  hosts: all
+  gather_facts: yes
+  become: yes
+  vars:
+    security_headers_block: |
+      Header always set X-Content-Type-Options "nosniff"
+      Header always set X-Frame-Options "SAMEORIGIN"
+      Header always set Referrer-Policy "strict-origin-when-cross-origin"
+      Header always set Permissions-Policy "geolocation=(), microphone=(), camera=()"
+      Header always set Content-Security-Policy "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'"
+  tasks:
+    - name: 检测 Apache
+      stat:
+        path: /etc/apache2/apache2.conf
+      register: apache_debian
+    - name: 检测 Nginx
+      stat:
+        path: /etc/nginx/nginx.conf
+      register: nginx_conf
+
+    - name: Apache - 启用 headers 模块
+      command: a2enmod headers
+      when: apache_debian.stat.exists
+      failed_when: false
+      changed_when: false
+
+    - name: Apache - 部署安全头配置
+      copy:
+        dest: /etc/apache2/conf-available/rayscan-security-headers.conf
+        content: |
+          <IfModule mod_headers.c>
+          {{ security_headers_block }}
+          </IfModule>
+      when: apache_debian.stat.exists
+      notify: reload apache
+
+    - name: Apache - 启用配置片段
+      command: a2enconf rayscan-security-headers
+      when: apache_debian.stat.exists
+      failed_when: false
+      changed_when: false
+
+    - name: Nginx - 部署安全头配置
+      copy:
+        dest: /etc/nginx/conf.d/rayscan-security-headers.conf
+        content: |
+          add_header X-Content-Type-Options "nosniff" always;
+          add_header X-Frame-Options "SAMEORIGIN" always;
+          add_header Referrer-Policy "strict-origin-when-cross-origin" always;
+          add_header Content-Security-Policy "default-src 'self'" always;
+      when: nginx_conf.stat.exists
+      notify: reload nginx
+
+    - name: 无 Web 服务时记录说明
+      debug:
+        msg: "未检测到 Apache/Nginx 标准路径，请在目标手动配置安全响应头"
+      when: not apache_debian.stat.exists and not nginx_conf.stat.exists
+
+  handlers:
+    - name: reload apache
+      service:
+        name: apache2
+        state: reloaded
+      failed_when: false
+    - name: reload nginx
+      service:
+        name: nginx
+        state: reloaded
+      failed_when: false

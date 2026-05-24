@@ -1,0 +1,24 @@
+---
+- name: SSH 基础加固
+  hosts: all
+  become: yes
+  tasks:
+    - name: 禁止 root 密码登录（保留密钥）
+      lineinfile:
+        path: /etc/ssh/sshd_config
+        regexp: "^#?PermitRootLogin"
+        line: "PermitRootLogin prohibit-password"
+      notify: restart sshd
+
+    - name: 禁用空口令
+      lineinfile:
+        path: /etc/ssh/sshd_config
+        regexp: "^#?PermitEmptyPasswords"
+        line: "PermitEmptyPasswords no"
+
+  handlers:
+    - name: restart sshd
+      service:
+        name: ssh
+        state: restarted
+      failed_when: false

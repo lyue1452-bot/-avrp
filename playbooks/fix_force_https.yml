@@ -1,0 +1,24 @@
+---
+- name: HTTP 强制跳转 HTTPS（需已有证书）
+  hosts: all
+  become: yes
+  tasks:
+    - name: Apache HTTPS 重定向
+      copy:
+        dest: /etc/apache2/conf-available/rayscan-https-redirect.conf
+        content: |
+          <VirtualHost *:80>
+            RewriteEngine On
+            RewriteCond %{HTTPS} off
+            RewriteRule ^ https://%{HTTP_HOST}%{REQUEST_URI} [L,R=301]
+          </VirtualHost>
+      failed_when: false
+
+    - name: 启用重定向配置
+      command: a2enconf rayscan-https-redirect
+      failed_when: false
+      changed_when: false
+
+    - name: 提示
+      debug:
+        msg: "请确认 443 端口已配置有效 SSL 证书后再启用重定向"

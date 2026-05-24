@@ -1,0 +1,2 @@
+Host,Port,Issue Title,Risk Level,Details,Fix Advice
+172.16.0.1,443,Weak TLS Cipher,High,TLS 1.0 enabled,Disable TLS 1.0

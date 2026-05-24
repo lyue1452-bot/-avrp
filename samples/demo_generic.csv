@@ -1,0 +1,3 @@
+Target,Port,Vulnerability,Severity,Description,Recommendation
+192.168.1.10,443,Missing HSTS Header,Medium,Server does not send Strict-Transport-Security,Enable HSTS on web server
+192.168.1.10,80,Directory Listing Enabled,Low,Index of / is exposed,Disable directory listing

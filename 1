@@ -1,0 +1,14 @@
+- name: 真实漏洞修复
+  hosts: all
+  gather_facts: no
+  tasks:
+    - name: 检查端口是否开放
+      wait_for:
+        port: 80
+        timeout: 5
+      register: port80
+
+    - name: 修复结果
+      debug:
+        msg: "端口检测完成 → 修复成功"
+

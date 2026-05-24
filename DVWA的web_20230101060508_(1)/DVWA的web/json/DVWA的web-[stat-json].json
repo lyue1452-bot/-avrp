@@ -1,0 +1,31 @@
+{
+    "SCANINFO": {
+        "PRODUCT": "一体化漏洞评估系统",
+        "COMPANY": "远江盛邦安全科技集团股份有限公司",
+        "SCANTASK": "DVWA的web",
+        "VERSION": "V3.0(8.1.0-R4)",
+        "SIGVER": "8.20250828173824",
+        "SCANTASKID": 12,
+        "STARTTIME": "2026-01-16 15:23:23",
+        "ENDTIME": "2026-01-16 15:24:14",
+        "SCANTIME": "51秒"
+    },
+    "WEBSITES": [
+        {
+            "URL": "http://114.55.144.63",
+            "ID": 81,
+            "WEBSITE_INFO": "Apache/2.4.25 (Debian)",
+            "WEBSITE_LANGUAGE": "",
+            "WEBSITE_ENCODER": "utf-8",
+            "WEBSITE_LOCAL": "",
+            "VUL_TOTAL": 14,
+            "VUL_HIGH": 0,
+            "VUL_MEDIUM": 2,
+            "VUL_LOW": 10,
+            "VUL_INFO": 2,
+            "VUL_SCORE": 5.52,
+            "VUL_GRADE": "比较危险",
+            "WEBSITE_TITLE": "Login :: Damn Vulnerable Web Application (DVWA) v1.10 *Development*"
+        }
+    ]
+}

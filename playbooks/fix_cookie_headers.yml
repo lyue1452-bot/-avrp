@@ -1,0 +1,19 @@
+---
+- name: Cookie 安全属性加固（Apache 全局 Set-Cookie 修补）
+  hosts: all
+  gather_facts: no
+  become: yes
+  tasks:
+    - name: Apache - Cookie 属性补丁配置
+      copy:
+        dest: /etc/apache2/conf-available/rayscan-cookie-headers.conf
+        content: |
+          <IfModule mod_headers.c>
+            Header edit Set-Cookie ^(.*)$ "$1; HttpOnly; Secure; SameSite=Strict"
+          </IfModule>
+      when: ansible_facts is defined
+      failed_when: false
+
+    - name: 提示 HTTPS 依赖
+      debug:
+        msg: "Cookie Secure/SameSite 需在 HTTPS 站点生效；HTTP 站点请优先启用 fix_force_https 或配置 TLS"

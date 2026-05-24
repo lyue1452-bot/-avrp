@@ -1,0 +1,18 @@
+---
+- name: 登录接口限速（Apache mod_evasive / Nginx limit_req 示例）
+  hosts: all
+  become: yes
+  tasks:
+    - name: Nginx 登录限速片段
+      copy:
+        dest: /etc/nginx/conf.d/rayscan-login-limit.conf
+        content: |
+          limit_req_zone $binary_remote_addr zone=login:10m rate=5r/m;
+          location ~ /(login|signin|auth) {
+            limit_req zone=login burst=3 nodelay;
+          }
+      failed_when: false
+
+    - name: 说明
+      debug:
+        msg: "暴力破解防护建议结合 WAF、验证码、账号锁定策略，本剧本仅示例限速"
