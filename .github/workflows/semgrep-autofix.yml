@@ -1,0 +1,80 @@
+# ============================================================
+# Semgrep 自动修复工作流
+# 在 PR 上运行 Semgrep 扫描 → 应用 autofix → 提交回 PR → 运行测试
+# ============================================================
+name: Semgrep Autofix
+
+on:
+  pull_request:
+    types: [opened, synchronize]
+
+env:
+  TEST_COMMAND: ${{ vars.TEST_COMMAND || './run-tests.sh' }}
+  AUTO_COMMIT_FIX: ${{ vars.AUTO_COMMIT_FIX || 'true' }}
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  semgrep-autofix:
+    name: semgrep-autofix
+    runs-on: ubuntu-latest
+    # 避免 [skip ci] 提交引起的循环触发
+    if: ${{ !contains(github.event.pull_request.title, '[skip ci]') && !contains(github.event.head_commit.message, '[skip ci]') }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.head_ref }}
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Cache Semgrep rules
+        uses: actions/cache@v4
+        with:
+          path: ~/.semgrep
+          key: semgrep-cache-${{ runner.os }}
+
+      - name: Install Semgrep
+        run: pip install semgrep
+
+      - name: Run Semgrep with autofix
+        run: |
+          semgrep \
+            --config .semgrep.yml \
+            --autofix \
+            --error \
+            --suppress-errors \
+            --output semgrep-report.txt \
+            src/ || true
+
+      - name: Check for changes
+        id: check-changes
+        run: |
+          if [ -n "$(git status --porcelain)" ]; then
+            echo "has_changes=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "has_changes=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Commit and push autofix changes
+        if: steps.check-changes.outputs.has_changes == 'true' && env.AUTO_COMMIT_FIX == 'true'
+        run: |
+          git config user.name "semgrep-autofix[bot]"
+          git config user.email "semgrep-autofix[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "fix: automatic Semgrep autofix [skip ci]"
+          git push
+
+      - name: Run tests after autofix
+        if: steps.check-changes.outputs.has_changes == 'true'
+        run: |
+          echo "Running tests to verify autofix changes..."
+          pip install -r requirements.txt
+          cd frontend && npm ci && cd ..
+          ${{ env.TEST_COMMAND }}

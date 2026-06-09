@@ -1,0 +1,76 @@
+# ============================================================
+# Polaris 配置 — Kubernetes 部署清单安全检查与自动修复
+# ============================================================
+checks:
+  # ==================== 安全上下文 ====================
+  security:
+    hostIPCSet:
+      severity: error
+      action: fix
+    hostNetworkSet:
+      severity: error
+      action: fix
+    hostPIDSet:
+      severity: error
+      action: fix
+    privileged:
+      severity: error
+      action: fix
+    readOnlyRootFilesystem:
+      severity: error
+      action: fix
+    allowPrivilegeEscalation:
+      severity: error
+      action: fix
+    runAsNonRoot:
+      severity: error
+      action: fix
+    runAsPrivileged:
+      severity: error
+      action: fix
+
+  # ==================== 资源限制 ====================
+  resources:
+    memoryLimitsMissing:
+      severity: error
+      action: fix
+      defaultMemoryLimit: "256Mi"
+    cpuLimitsMissing:
+      severity: error
+      action: fix
+      defaultCpuLimit: "500m"
+    memoryRequestsMissing:
+      severity: error
+      action: fix
+      defaultMemoryRequest: "128Mi"
+    cpuRequestsMissing:
+      severity: error
+      action: fix
+      defaultCpuRequest: "100m"
+
+  # ==================== 健康检查 ====================
+  healthChecks:
+    readinessProbeMissing:
+      severity: error
+      action: ignore
+    livenessProbeMissing:
+      severity: error
+      action: ignore
+
+  # ==================== 镜像配置 ====================
+  images:
+    tagNotSpecified:
+      severity: error
+      action: fix
+    pullPolicyNotAlways:
+      severity: warning
+      action: ignore
+
+  # ==================== 网络 ====================
+  networking:
+    hostPortSet:
+      severity: error
+      action: fix
+    hostNetworkSet:
+      severity: error
+      action: fix

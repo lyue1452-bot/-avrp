@@ -1,0 +1,49 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": [
+    "config:recommended",
+    ":separateMajorMinor",
+    ":combinePatchMinorUpdates",
+    ":enableVulnerabilityAlerts",
+    ":label(renovate)"
+  ],
+  "enabled": true,
+  "schedule": ["before 6:00am every day"],
+  "timezone": "Asia/Shanghai",
+  "labels": ["dependencies"],
+  "rebaseWhen": "auto",
+  "vulnerabilityAlerts": {
+    "labels": ["security"],
+    "enabled": true
+  },
+  "packageRules": [
+    {
+      "description": "Auto-merge patch updates when CI passes",
+      "matchUpdateTypes": ["patch"],
+      "automerge": true,
+      "automergeType": "pr",
+      "platformAutomerge": true
+    },
+    {
+      "description": "Add security label for vulnerability-fixing PRs",
+      "matchUpdateTypes": ["pin", "digest", "patch", "minor", "major"],
+      "matchCategories": ["security"],
+      "labels": ["security"]
+    }
+  ],
+  "npm": {
+    "enabled": true,
+    "fileMatch": ["frontend/package.json"]
+  },
+  "maven": {
+    "enabled": true
+  },
+  "pip_requirements": {
+    "enabled": true,
+    "fileMatch": ["requirements.txt"]
+  },
+  "dockerfile": {
+    "enabled": true,
+    "fileMatch": ["Dockerfile"]
+  }
+}

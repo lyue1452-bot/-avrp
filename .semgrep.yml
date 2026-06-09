@@ -1,0 +1,168 @@
+# ============================================================
+# Semgrep 自动修复规则配置
+# 规则来源：
+#   - Semgrep 社区规则集 (p/security-audit)
+#   - 针对 JS/TS、Java、Python 的高危害 autofix 规则
+# ============================================================
+version: "2"
+
+rules:
+  # ---- 通用规则集：覆盖大多数语言的安全审计 ----
+  - id: p/security-audit
+    source: registry
+    options:
+      autofix: true
+
+  # ==================== JavaScript / TypeScript ====================
+
+  # 危险 innerHTML 注入
+  - id: generic.html-templates.security.dangerouslySetInnerHTML.dangerouslySetInnerHTML
+    source: registry
+    languages: [ts, tsx, js, jsx]
+    options:
+      autofix: true
+
+  # 检测 eval 使用（高危）
+  - id: javascript.security.audit.detect-eval-with-expression
+    source: registry
+    languages: [js, ts]
+    options:
+      autofix: true
+
+  # 检测不安全的随机数生成
+  - id: javascript.security.audit.detect-insecure-randomness
+    source: registry
+    languages: [js, ts]
+    options:
+      autofix: true
+
+  # 检测 hardcoded 密钥/密码
+  - id: javascript.security.audit.detect-non-literal-require
+    source: registry
+    languages: [js, ts]
+    options:
+      autofix: true
+
+  # 检测不安全的 child_process 调用
+  - id: javascript.security.audit.detect-child-process
+    source: registry
+    languages: [js, ts]
+    options:
+      autofix: true
+
+  # ==================== Python ====================
+
+  # 检测不安全的哈希算法（MD5）
+  - id: python.cryptography.security.insecure-hash.insecure-hash-algorithm-md5
+    source: registry
+    languages: [python]
+    options:
+      autofix: true
+
+  # 检测不安全的哈希算法（SHA1）
+  - id: python.cryptography.security.insecure-hash.insecure-hash-algorithm-sha1
+    source: registry
+    languages: [python]
+    options:
+      autofix: true
+
+  # 检测 SQL 注入（f-string/format 拼接）
+  - id: python.lang.security.audit.sql-injection.detect-sql-injection
+    source: registry
+    languages: [python]
+    options:
+      autofix: true
+
+  # 检测 subprocess shell=True
+  - id: python.lang.security.audit.subprocess-shell-true.subprocess-shell-true
+    source: registry
+    languages: [python]
+    options:
+      autofix: true
+
+  # 检测 eval/exec 使用
+  - id: python.lang.security.audit.detect-eval.detect-eval
+    source: registry
+    languages: [python]
+    options:
+      autofix: true
+
+  # 检测不安全的 yaml.load（无 Loader）
+  - id: python.lang.security.audit.dangerous-input-yaml-load.dangerous-input-yaml-load
+    source: registry
+    languages: [python]
+    options:
+      autofix: true
+
+  # 检测 jwt 解码未验证
+  - id: python.lang.security.audit.jwt.jwt-decode-verify-false
+    source: registry
+    languages: [python]
+    options:
+      autofix: true
+
+  # 检测 assert 用于调试（在非 test 文件中）
+  - id: python.lang.security.audit.detect-hardcoded-password.detect-hardcoded-password
+    source: registry
+    languages: [python]
+    options:
+      autofix: true
+
+  # ==================== Java ====================
+
+  # 检测使用 MD5 进行哈希
+  - id: java.lang.security.audit.crypto.weak-hash.use-of-md5
+    source: registry
+    languages: [java]
+    options:
+      autofix: true
+
+  # 检测使用 SHA1
+  - id: java.lang.security.audit.crypto.weak-hash.use-of-sha1
+    source: registry
+    languages: [java]
+    options:
+      autofix: true
+
+  # 检测 SQL 注入（字符串拼接）
+  - id: java.lang.security.audit.sql-injection.sql-injection
+    source: registry
+    languages: [java]
+    options:
+      autofix: true
+
+  # 检测命令注入（Runtime.exec）
+  - id: java.lang.security.audit.command-injection.command-injection
+    source: registry
+    languages: [java]
+    options:
+      autofix: true
+
+  # 检测反序列化漏洞
+  - id: java.lang.security.audit.deserialization.deserialization-of-user-input
+    source: registry
+    languages: [java]
+    options:
+      autofix: true
+
+  # 检测硬编码密码
+  - id: java.lang.security.audit.hardcoded-password.hardcoded-password
+    source: registry
+    languages: [java]
+    options:
+      autofix: true
+
+  # 检测 LDAP 注入
+  - id: java.lang.security.audit.ldap-injection.ldap-injection
+    source: registry
+    languages: [java]
+    options:
+      autofix: true
+
+  # ==================== 通用 ====================
+
+  # 检测 .env / 密钥文件泄露
+  - id: generic.secrets.security.detected-secret.detected-secret
+    source: registry
+    options:
+      autofix: true

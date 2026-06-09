@@ -1,0 +1,74 @@
+# ============================================================
+# Kubernetes Deployment — 小钢炮漏洞管理平台
+# ============================================================
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: rayscan
+  labels:
+    app: rayscan
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: rayscan
+  template:
+    metadata:
+      labels:
+        app: rayscan
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        fsGroup: 1000
+      containers:
+        - name: rayscan
+          image: rayscan:latest
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 5000
+          env:
+            - name: JWT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: rayscan-secret
+                  key: jwt_secret
+          resources:
+            requests:
+              memory: "128Mi"
+              cpu: "100m"
+            limits:
+              memory: "256Mi"
+              cpu: "500m"
+          securityContext:
+            readOnlyRootFilesystem: true
+            allowPrivilegeEscalation: false
+            privileged: false
+            capabilities:
+              drop:
+                - ALL
+          livenessProbe:
+            httpGet:
+              path: /api/health
+              port: 5000
+            initialDelaySeconds: 30
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /api/health
+              port: 5000
+            initialDelaySeconds: 5
+            periodSeconds: 5
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: rayscan-service
+spec:
+  selector:
+    app: rayscan
+  ports:
+    - protocol: TCP
+      port: 80
+      targetPort: 5000
+  type: ClusterIP

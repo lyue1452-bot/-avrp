@@ -1,0 +1,76 @@
+# ============================================================
+# Copacetic 应急补丁工作流
+# 手动触发：对已构建的容器镜像打系统级漏洞补丁
+# 使用场景：生产环境发现紧急 CVE，无需源码重新构建
+# ============================================================
+name: Copacetic Emergency Patch
+
+on:
+  workflow_dispatch:
+    inputs:
+      IMAGE_NAME:
+        description: "要修补的镜像名称（例如 nginx）"
+        required: true
+        type: string
+      IMAGE_TAG:
+        description: "要修补的镜像标签（例如 latest）"
+        required: true
+        type: string
+
+env:
+  REGISTRY: ${{ vars.REGISTRY || 'ttl.sh' }}
+
+jobs:
+  copa-patch:
+    name: copa-patch
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Pull target image
+        run: |
+          docker pull ${{ github.event.inputs.IMAGE_NAME }}:${{ github.event.inputs.IMAGE_TAG }}
+
+      - name: Install Copacetic
+        run: |
+          COPA_VERSION=$(curl -s https://api.github.com/repos/project-copacetic/copacetic/releases/latest | grep tag_name | cut -d '"' -f 4)
+          echo "Latest copa version: $COPA_VERSION"
+          curl -sL "https://github.com/project-copacetic/copacetic/releases/download/${COPA_VERSION}/copa_${COPA_VERSION#v}_linux_amd64.tar.gz" -o copa.tar.gz
+          tar -xzf copa.tar.gz
+          chmod +x copa
+          sudo mv copa /usr/local/bin/
+          rm copa.tar.gz
+
+      - name: Run copa patch
+        id: patch
+        continue-on-error: true
+        run: |
+          PATCHED_TAG="${{ github.event.inputs.IMAGE_TAG }}-patched"
+          copa patch \
+            --image ${{ github.event.inputs.IMAGE_NAME }}:${{ github.event.inputs.IMAGE_TAG }} \
+            --patched-tag ${{ env.REGISTRY }}/${{ github.event.inputs.IMAGE_NAME }}:${PATCHED_TAG} \
+            --output image
+
+      - name: Push patched image
+        if: steps.patch.outcome == 'success'
+        run: |
+          PATCHED_TAG="${{ github.event.inputs.IMAGE_TAG }}-patched"
+          docker push ${{ env.REGISTRY }}/${{ github.event.inputs.IMAGE_NAME }}:${PATCHED_TAG}
+
+      - name: Output patched image info to job summary
+        if: always()
+        run: |
+          PATCHED_TAG="${{ github.event.inputs.IMAGE_TAG }}-patched"
+          cat <<'EOF' >> "$GITHUB_STEP_SUMMARY"
+          ## Copacetic Patch Result
+
+          | Item | Value |
+          |------|-------|
+          | Original Image | `${{ github.event.inputs.IMAGE_NAME }}:${{ github.event.inputs.IMAGE_TAG }}` |
+          | Patched Image | `${{ env.REGISTRY }}/${{ github.event.inputs.IMAGE_NAME }}:${PATCHED_TAG}` |
+          | Pull Command | `docker pull ${{ env.REGISTRY }}/${{ github.event.inputs.IMAGE_NAME }}:${PATCHED_TAG}` |
+          EOF

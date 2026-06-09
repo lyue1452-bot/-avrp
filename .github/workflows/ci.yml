@@ -1,0 +1,67 @@
+# ============================================================
+# CI 工作流 — 测试 + 构建 + 推送镜像
+# 触发：PR 的 opened/synchronize、推送至 main
+# ============================================================
+name: CI
+
+on:
+  pull_request:
+    types: [opened, synchronize]
+  push:
+    branches: [main]
+
+env:
+  TEST_COMMAND: ${{ vars.TEST_COMMAND || './run-tests.sh' }}
+
+jobs:
+  test:
+    name: test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install backend dependencies
+        run: pip install -r requirements.txt
+
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm ci
+
+      - name: Run tests
+        run: ${{ env.TEST_COMMAND }}
+
+  build:
+    name: build
+    needs: [test]
+    runs-on: ubuntu-latest
+    # 仅在推送到 main 时构建镜像
+    if: github.ref == 'refs/heads/main'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build and push to ttl.sh
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: ttl.sh/rayscan-${{ github.sha }}:1h
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
