@@ -1,0 +1,62 @@
+# ============================================================
+# Trivy 容器/系统漏洞扫描
+# 扫描容器镜像和基础设施的系统级 CVE
+# ============================================================
+name: Trivy Vulnerability Scan
+
+on:
+  schedule:
+    - cron: '0 2 * * *'
+  workflow_dispatch:
+    inputs:
+      IMAGE_REF:
+        description: "要扫描的镜像 (例如 ttl.sh/rayscan:latest)"
+        required: false
+        type: string
+      SEVERITY:
+        description: "最低严重级别"
+        required: false
+        default: "HIGH,CRITICAL"
+        type: string
+
+permissions:
+  contents: read
+  security-events: write
+
+jobs:
+  trivy-scan:
+    name: trivy-scan
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Trivy
+        run: |
+          curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sh
+          sudo mv trivy /usr/local/bin/
+
+      - name: Scan repository (fs mode)
+        run: |
+          trivy fs --format json --severity ${{ github.event.inputs.SEVERITY || 'HIGH,CRITICAL' }} \
+            -o trivy-report.json .
+
+      - name: Scan Docker image (if provided)
+        if: github.event_name == 'workflow_dispatch' && github.event.inputs.IMAGE_REF != ''
+        run: |
+          trivy image --format json --severity ${{ github.event.inputs.SEVERITY || 'HIGH,CRITICAL' }} \
+            -o trivy-image-report.json ${{ github.event.inputs.IMAGE_REF }}
+
+      - name: Upload Trivy report as artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: trivy-report
+          path: trivy-report.json
+
+      - name: Report result
+        run: |
+          if [ -f trivy-report.json ]; then
+            COUNT=$(python3 -c "import json; d=json.load(open('trivy-report.json')); print(sum(len(r.get('Vulnerabilities',[])) for r in d.get('Results',[])))")
+            echo "## Trivy Scan Results" >> "$GITHUB_STEP_SUMMARY"
+            echo "Found $COUNT vulnerabilities" >> "$GITHUB_STEP_SUMMARY"
+          fi

@@ -2,8 +2,8 @@
   <el-container style="height: 100vh">
     <el-aside width="220px" class="sidebar">
       <div class="logo">
-        <el-icon :size="22"><Shield /></el-icon>
-        <span>小钢炮 AVRP</span>
+        <el-icon :size="22"><Lock /></el-icon>
+        <span>自动化漏洞管理与修复平台</span>
       </div>
       <el-menu
         :default-active="activeMenu"
@@ -27,6 +27,10 @@
         <el-menu-item index="/reports">
           <el-icon><Document /></el-icon>
           <span>报告管理</span>
+        </el-menu-item>
+        <el-menu-item index="/pipeline">
+          <el-icon><Connection /></el-icon>
+          <span>流水线</span>
         </el-menu-item>
         <el-menu-item index="/settings">
           <el-icon><Setting /></el-icon>

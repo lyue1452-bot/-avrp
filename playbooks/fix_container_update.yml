@@ -1,0 +1,107 @@
+---
+- name: 容器/主机漏洞补丁 — 运行时包更新（临时修复）
+  hosts: all
+  gather_facts: yes
+  become: yes
+  vars:
+    # 由扫描数据通过 extra_vars 传入
+    # packages: []  # 指定要升级的包名列表（留空则全量安全更新）
+    packages: []
+    reboot_after: false  # 升级后是否需要重启（内核升级时需要）
+
+  tasks:
+    - name: Debian/Ubuntu - 更新包缓存
+      apt:
+        update_cache: yes
+        cache_valid_time: 3600
+      when: ansible_os_family == "Debian"
+
+    - name: Debian/Ubuntu - 全量安全更新
+      apt:
+        upgrade: security
+        autoremove: yes
+        autoclean: yes
+      when: ansible_os_family == "Debian" and packages | length == 0
+
+    - name: Debian/Ubuntu - 指定包更新
+      apt:
+        name: "{{ packages }}"
+        state: latest
+      when: ansible_os_family == "Debian" and packages | length > 0
+
+    - name: RHEL/CentOS - 全量安全更新
+      yum:
+        name: "*"
+        state: latest
+        update_cache: yes
+        security: yes
+      when: ansible_os_family == "RedHat" and packages | length == 0
+
+    - name: RHEL/CentOS - 指定包更新
+      yum:
+        name: "{{ packages }}"
+        state: latest
+        update_cache: yes
+      when: ansible_os_family == "RedHat" and packages | length > 0
+
+    - name: Alpine - 更新包缓存
+      apk:
+        update_cache: yes
+      when: ansible_os_family == "Alpine"
+
+    - name: Alpine - 全量升级
+      apk:
+        upgrade: yes
+        available: yes
+      when: ansible_os_family == "Alpine" and packages | length == 0
+
+    - name: Alpine - 指定包更新
+      apk:
+        name: "{{ packages }}"
+        state: latest
+        update_cache: yes
+      when: ansible_os_family == "Alpine" and packages | length > 0
+
+    - name: SUSE - 更新包缓存
+      zypper:
+        name: "*"
+        state: latest
+        update_cache: yes
+        type: patch
+      when: ansible_os_family == "Suse" and packages | length == 0
+
+    - name: 检测是否需要重启
+      stat:
+        path: /var/run/reboot-required
+      register: reboot_required
+      when: ansible_os_family == "Debian"
+
+    - name: 检测内核是否更新（RHEL）
+      shell: |
+        current_kernel=$(uname -r)
+        latest_kernel=$(rpm -q --last kernel | head -1 | awk '{print $1}' | sed 's/kernel-//')
+        [ "$current_kernel" != "$latest_kernel" ] && echo "reboot_needed" || echo "ok"
+      register: kernel_check
+      changed_when: false
+      when: ansible_os_family == "RedHat"
+
+    - name: 重启主机
+      reboot:
+        reboot_timeout: 300
+      when:
+        - reboot_after
+        - (reboot_required.stat.exists) or (kernel_check.stdout is defined and kernel_check.stdout == "reboot_needed")
+
+    - name: 输出更新摘要
+      debug:
+        msg: "包更新已完成。{{ '系统需要重启以完成内核更新。' if reboot_required.stat.exists or (kernel_check.stdout is defined and kernel_check.stdout == 'reboot_needed') else '' }}"
+
+    - name: 重要提示—完整修复需重新构建容器镜像
+      debug:
+        msg: >
+          ⚠️ 此为运行时临时补丁。
+          请通过 CI/CD 重新构建并部署容器镜像以确保彻底修复 CVE。
+          建议步骤：
+          1. 更新 Dockerfile 中的基础镜像版本
+          2. 重新构建镜像: docker build --no-cache -t your-app:latest .
+          3. 重新部署到生产环境

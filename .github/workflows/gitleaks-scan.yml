@@ -1,0 +1,51 @@
+# ============================================================
+# Gitleaks 密钥泄露扫描
+# 检测代码仓库中的硬编码密钥/凭据
+# ============================================================
+name: Gitleaks Secret Scan
+
+on:
+  pull_request:
+    types: [opened, synchronize]
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  gitleaks-scan:
+    name: gitleaks-scan
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install Gitleaks
+        run: |
+          curl -sL https://github.com/gitleaks/gitleaks/releases/latest/download/gitleaks_linux_amd64.tar.gz \
+            -o gitleaks.tar.gz
+          tar -xzf gitleaks.tar.gz
+          sudo mv gitleaks /usr/local/bin/
+          rm gitleaks.tar.gz
+
+      - name: Run Gitleaks detect
+        run: |
+          gitleaks detect --report-format json --report-path gitleaks-report.json \
+            --no-git --source . || true
+
+      - name: Upload Gitleaks report
+        uses: actions/upload-artifact@v4
+        with:
+          name: gitleaks-report
+          path: gitleaks-report.json
+
+      - name: Report result
+        run: |
+          if [ -f gitleaks-report.json ]; then
+            COUNT=$(python3 -c "import json; d=json.load(open('gitleaks-report.json')); print(len(d) if isinstance(d,list) else 0)")
+            echo "## Gitleaks Secret Scan" >> "$GITHUB_STEP_SUMMARY"
+            echo "Found $COUNT potential secrets" >> "$GITHUB_STEP_SUMMARY"
+          fi

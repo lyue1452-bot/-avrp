@@ -8,6 +8,7 @@ import VulnDetail from '../views/vulnerabilities/VulnDetail.vue'
 import TaskList from '../views/tasks/TaskList.vue'
 import TaskDetail from '../views/tasks/TaskDetail.vue'
 import ReportView from '../views/reports/ReportView.vue'
+import PipelineView from '../views/pipeline/PipelineView.vue'
 import SettingsView from '../views/settings/SettingsView.vue'
 import UserList from '../views/users/UserList.vue'
 
@@ -24,6 +25,7 @@ const routes = [
       { path: 'tasks', component: TaskList, meta: { title: '任务管理' } },
       { path: 'tasks/:id', component: TaskDetail, meta: { title: '任务详情' } },
       { path: 'reports', component: ReportView, meta: { title: '报告管理' } },
+      { path: 'pipeline', component: PipelineView, meta: { title: '流水线' } },
       { path: 'settings', component: SettingsView, meta: { title: '系统设置' } },
       { path: 'users', component: UserList, meta: { title: '用户管理' } },
     ],

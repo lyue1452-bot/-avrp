@@ -6,9 +6,11 @@ from models import (
     get_connection, get_vulnerability, update_fix_status,
     create_task, update_task_status,
 )
-from remediation.rules import REMEDIATION_RULES, match_remediation
-from remediation.executor import run_playbook
+from remediation.rules import REMEDIATION_RULES, match_remediation, classify_record
+from remediation.executor import run_playbook, ansible_runtime_info
 from remediation.verify import verify_fix
+from remediation.fix_context import build_extra_vars, extra_vars_to_cli
+from remediation.reclassify import reclassify_vulnerabilities, reclassify_row, row_to_record
 from config import VERIFY_AFTER_FIX
 
 vulns_bp = Blueprint("vulns", __name__, url_prefix="/vulns")
@@ -119,6 +121,34 @@ def vuln_delete(vuln_id):
     return jsonify({"ok": True, "msg": "已删除"})
 
 
+@vulns_bp.route("/reclassify", methods=["POST"])
+@jwt_required()
+def reclassify():
+    """重新匹配所有漏洞的修复规则（历史数据升级用）。"""
+    data = request.get_json(silent=True) or {}
+    asset_ip = (data.get("asset_ip") or "").strip() or None
+    stats = reclassify_vulnerabilities(asset_ip=asset_ip)
+    return jsonify({
+        "ok": True,
+        "msg": f"已重分类 {stats['updated']}/{stats['total']} 条，其中 {stats['auto_fixable']} 条可自动修复",
+        "stats": stats,
+    })
+
+
+def _ensure_fixable(row):
+    """若历史记录未标记可修复，尝试重新匹配规则并更新。"""
+    rec = row_to_record(row)
+    rule, auto = classify_record(rec)
+    if not rule or not auto:
+        return None
+    if not row["auto_fixable"] or (row["remediation_rule"] or "") != rule.rule_id:
+        conn = get_connection()
+        reclassify_row(row, conn=conn)
+        conn.commit()
+        conn.close()
+    return rule
+
+
 @vulns_bp.route("/<int:vuln_id>/fix", methods=["POST"])
 @jwt_required()
 def fix_single(vuln_id):
@@ -126,27 +156,29 @@ def fix_single(vuln_id):
     if not row:
         return jsonify({"ok": False, "msg": "漏洞不存在"}), 404
 
-    if not row["auto_fixable"]:
-        rule = match_remediation(row)
-        hint = rule.name if rule else "无匹配规则"
-        return jsonify({"ok": False, "msg": f"该漏洞需人工处理（{hint}）"})
+    rule = _ensure_fixable(row)
+    if not rule:
+        hint = match_remediation(row_to_record(row))
+        hint_name = hint.name if hint else "无匹配规则"
+        return jsonify({"ok": False, "msg": f"该漏洞需人工处理（{hint_name}）"})
 
+    row = get_vulnerability(vuln_id)
     rule_id = row["remediation_rule"]
-    rule = next((r for r in REMEDIATION_RULES if r.rule_id == rule_id), None)
-    if not rule:
-        rule = match_remediation(row)
-    if not rule:
-        return jsonify({"ok": False, "msg": "未找到修复规则"})
+    rule = next((r for r in REMEDIATION_RULES if r.rule_id == rule_id), None) or rule
 
     uid = int(get_jwt_identity())
-    # 创建任务记录
     task_id = create_task(vuln_id, rule.rule_id, row["asset_ip"], row["url"], created_by=str(uid))
     update_task_status(task_id, "running")
     update_fix_status(vuln_id, "fixing", "执行中...")
 
-    ok, output = run_playbook(rule, row["asset_ip"])
+    extra = extra_vars_to_cli(build_extra_vars(row))
+    ok, output = run_playbook(rule, row["asset_ip"], extra_vars=extra)
 
-    if ok and VERIFY_AFTER_FIX:
+    runtime = ansible_runtime_info()
+    if runtime.get("mode") == "simulate":
+        output = f"[{runtime['label']}] {output}"
+
+    if ok and VERIFY_AFTER_FIX and runtime.get("mode") != "simulate":
         v_ok, v_msg = verify_fix(rule, row["url"], row["asset_ip"])
         output += f"\n验证: {v_msg}"
         if not v_ok:
@@ -177,22 +209,26 @@ def batch_fix():
     results = []
     for vid in ids:
         row = get_vulnerability(vid)
-        if not row or not row["auto_fixable"]:
+        if not row:
+            results.append({"id": vid, "ok": False, "msg": "不存在"})
+            continue
+
+        rule = _ensure_fixable(row)
+        if not rule:
             results.append({"id": vid, "ok": False, "msg": "不可自动修复"})
             continue
 
+        row = get_vulnerability(vid)
         rule_id = row["remediation_rule"]
-        rule = next((r for r in REMEDIATION_RULES if r.rule_id == rule_id), None)
-        if not rule:
-            results.append({"id": vid, "ok": False, "msg": "无匹配规则"})
-            continue
+        rule = next((r for r in REMEDIATION_RULES if r.rule_id == rule_id), None) or rule
 
         uid = int(get_jwt_identity())
         task_id = create_task(vid, rule.rule_id, row["asset_ip"], row["url"], created_by=str(uid))
         update_task_status(task_id, "running")
         update_fix_status(vid, "fixing", "执行中...")
 
-        ok, output = run_playbook(rule, row["asset_ip"])
+        extra = extra_vars_to_cli(build_extra_vars(row))
+        ok, output = run_playbook(rule, row["asset_ip"], extra_vars=extra)
         status = "success" if ok else "failed"
         update_task_status(task_id, status, output)
         update_fix_status(vid, "fixed" if ok else "failed", output)

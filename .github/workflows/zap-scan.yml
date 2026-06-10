@@ -1,0 +1,53 @@
+# ============================================================
+# OWASP ZAP Web 动态扫描 (DAST)
+# 在部署的 staging 环境上运行 Web 漏洞扫描
+# ============================================================
+name: OWASP ZAP Scan
+
+on:
+  workflow_dispatch:
+    inputs:
+      TARGET_URL:
+        description: "扫描目标 URL"
+        required: true
+        type: string
+        default: "https://staging.example.com"
+
+permissions:
+  contents: read
+
+jobs:
+  zap-scan:
+    name: zap-scan
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: ZAP Full Scan
+        uses: zaproxy/action-full-scan@v0
+        with:
+          target: ${{ github.event.inputs.TARGET_URL }}
+          cmd_options: '-J zap_report.json'
+
+      - name: Upload ZAP report
+        uses: actions/upload-artifact@v4
+        with:
+          name: zap-report
+          path: zap_report.json
+
+      - name: Report result
+        run: |
+          if [ -f zap_report.json ]; then
+            echo "## ZAP Scan Results" >> "$GITHUB_STEP_SUMMARY"
+            python3 -c "
+import json
+d = json.load(open('zap_report.json'))
+for site in d.get('site', []):
+    alerts = site.get('alerts', [])
+    high = sum(1 for a in alerts if 'High' in a.get('riskdesc',''))
+    med = sum(1 for a in alerts if 'Medium' in a.get('riskdesc',''))
+    low = sum(1 for a in alerts if 'Low' in a.get('riskdesc',''))
+    print(f'High: {high} | Medium: {med} | Low: {low}')
+" >> "$GITHUB_STEP_SUMMARY"
+          fi

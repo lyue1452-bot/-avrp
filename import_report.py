@@ -5,7 +5,7 @@ import sys
 from pathlib import Path
 
 from config import DEFAULT_REPORT
-from models import init_database, upsert_vulnerability
+from models import init_all_tables, upsert_vulnerability
 from adapters import parse_report
 from remediation.rules import classify_record
 
@@ -37,7 +37,7 @@ def main():
     parser.add_argument("--init-only", action="store_true", help="仅初始化数据库")
     args = parser.parse_args()
 
-    init_database()
+    init_all_tables()
     if args.init_only:
         print("数据库已初始化")
         return

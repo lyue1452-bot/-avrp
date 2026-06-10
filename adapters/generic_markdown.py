@@ -63,9 +63,14 @@ class GenericMarkdownAdapter(BaseAdapter):
         text = path.read_text(encoding="utf-8", errors="replace")
         records: List[VulnerabilityRecord] = []
         seen = set()
+        default_target_ip = self._extract_default_target_ip(text)
 
         # 优先解析详细漏洞描述章节（### V-###: 格式）
         for rec in self._parse_vuln_detail_sections(text):
+            if default_target_ip and (not rec.asset_ip or rec.asset_ip == "unknown"):
+                rec.asset_ip = default_target_ip
+                if not rec.url or rec.url.startswith("http://unknown"):
+                    rec.url = f"http://{rec.asset_ip}:{rec.port or 80}"
             fp = rec.compute_fingerprint()
             if fp not in seen:
                 seen.add(fp)
@@ -73,6 +78,10 @@ class GenericMarkdownAdapter(BaseAdapter):
 
         # 然后解析表格（特别是漏洞总览表）
         for rec in self._parse_tables(text):
+            if default_target_ip and (not rec.asset_ip or rec.asset_ip == "unknown"):
+                rec.asset_ip = default_target_ip
+                if not rec.url or rec.url.startswith("http://unknown"):
+                    rec.url = f"http://{rec.asset_ip}:{rec.port or 80}"
             fp = rec.compute_fingerprint()
             if fp not in seen:
                 seen.add(fp)
@@ -80,6 +89,10 @@ class GenericMarkdownAdapter(BaseAdapter):
 
         # 解析通用章节
         for rec in self._parse_sections(text):
+            if default_target_ip and (not rec.asset_ip or rec.asset_ip == "unknown"):
+                rec.asset_ip = default_target_ip
+                if not rec.url or rec.url.startswith("http://unknown"):
+                    rec.url = f"http://{rec.asset_ip}:{rec.port or 80}"
             fp = rec.compute_fingerprint()
             if fp not in seen:
                 seen.add(fp)
@@ -88,6 +101,10 @@ class GenericMarkdownAdapter(BaseAdapter):
         # 最后兜底：列表块
         if not records:
             for rec in self._parse_list_blocks(text):
+                if default_target_ip and (not rec.asset_ip or rec.asset_ip == "unknown"):
+                    rec.asset_ip = default_target_ip
+                    if not rec.url or rec.url.startswith("http://unknown"):
+                        rec.url = f"http://{rec.asset_ip}:{rec.port or 80}"
                 fp = rec.compute_fingerprint()
                 if fp not in seen:
                     seen.add(fp)
@@ -95,7 +112,30 @@ class GenericMarkdownAdapter(BaseAdapter):
 
         return records
 
+    def _extract_default_target_ip(self, text: str) -> str:
+        """从报告元数据中提取默认目标IP。"""
+        # 优先匹配目标IP字段
+        for m in KV_LINE.finditer(text):
+            key = m.group("key").strip()
+            val = m.group("val").strip()
+            if normalize_key(key) in {"目标ip", "目标", "ip", "targetip", "target", "目标地址"}:
+                ip_match = IP_RE.search(val)
+                if ip_match:
+                    return ip_match.group(0)
+        # 如果没有直观字段，则从前部文本寻找第一个 IP
+        head_text = text[:1000]
+        ip_m = IP_RE.search(head_text)
+        return ip_m.group(0) if ip_m else ""
+
+    def _normalize_vuln_id(self, vuln_id: str) -> str:
+        if not vuln_id:
+            return ""
+        normalized = str(vuln_id).strip().upper()
+        normalized = re.sub(r"^V-?", "", normalized)
+        return normalized or "0"
+
     def _parse_vuln_detail_sections(self, text: str) -> List[VulnerabilityRecord]:
+
         """解析 ### V-###: 漏洞名称 (严重程度) 格式的详细漏洞描述章节。"""
         records = []
         lines = text.splitlines()
@@ -105,7 +145,7 @@ class GenericMarkdownAdapter(BaseAdapter):
             # 匹配 ### V-###: 漏洞名称 (严重程度) 格式
             m = re.match(r"^### V-(\d+):\s*(.+?)(?:\s*\(([^)]+)\))?\s*$", line, re.I)
             if m:
-                vuln_id = m.group(1)
+                vuln_id = self._normalize_vuln_id(m.group(1))
                 vuln_name = m.group(2).strip()
                 severity_hint = m.group(3).strip() if m.group(3) else ""
                 
@@ -190,6 +230,9 @@ class GenericMarkdownAdapter(BaseAdapter):
         if not vuln_name:
             vuln_name = get("vuln_name")
         
+        if vuln_name:
+            vuln_name = re.sub(r'^(V-?\d+[:：]?\s*)', '', vuln_name, flags=re.I).strip()
+        
         if not vuln_name:
             # 尝试从所有单元格获取第一个非ID、非数字的项
             for cell_val in row.values():
@@ -247,8 +290,11 @@ class GenericMarkdownAdapter(BaseAdapter):
         url = get("url") or f"http://{asset_ip}:{port or 80}"
         description = f"ID: {vuln_id}\n来源: 漏洞总览表"
         solution = get("solution") or ""
-        cve = get("cve") or extract_cve(vuln_name)
+        cve = get("cve") or ""
+        if not cve:
+            cve = extract_cve(vuln_name)
         
+        normalized_id = self._normalize_vuln_id(vuln_id) if vuln_id else ""
         return VulnerabilityRecord(
             vuln_name=vuln_name[:500],
             severity=severity,
@@ -259,8 +305,8 @@ class GenericMarkdownAdapter(BaseAdapter):
             solution=solution[:2000],
             source_tool=self.tool_name,
             cve=cve,
-            plugin_id=vuln_id or "",
-            external_id=vuln_id or "",
+            plugin_id=normalized_id or "",
+            external_id=normalized_id or "",
         )
 
     def _parse_sections(self, text: str) -> List[VulnerabilityRecord]:
@@ -330,19 +376,47 @@ class GenericMarkdownAdapter(BaseAdapter):
         table_lines = sum(1 for ln in lines if ln.startswith("|"))
         return table_lines >= 2 and table_lines >= len(lines) * 0.6
 
+    def _section_title_is_noise(self, title: str) -> bool:
+        title_lower = title.lower()
+        noise_keywords = [
+            "扫描", "测试", "验证", "命令", "输出", "结果", "工具", "报告元", "概述", "安装",
+            "风险", "评估", "改进建议", "目录", "未安装", "操作系统", "端口扫描", "状态变化",
+            "初始扫描", "验证扫描", "whatweb", "nikto", "waf检测", "目录枚举", "实际连接测试",
+            "详细漏洞描述", "已安装渗透测试工具", "未安装工具", "综合风险评估",
+            "立即修复", "短期修复", "长期修复",
+        ]
+        if any(keyword in title_lower for keyword in noise_keywords):
+            return True
+        # 排除中文章节编号标题如“四、端口3306 — MySQL数据库”，除非显式包含漏洞或V-标识
+        if re.match(r'^[一二三四五六七八九十]+、', title.strip()):
+            if "漏洞" in title_lower or "v-" in title_lower or "暴露" in title_lower or "未设置" in title_lower:
+                return False
+            return True
+        if re.match(r'^[0-9]+、', title.strip()):
+            if "漏洞" in title_lower or "v-" in title_lower or "暴露" in title_lower or "未设置" in title_lower:
+                return False
+            return True
+        # 排除纯风险评估小节标题
+        if title_lower.startswith("风险") and "漏洞" not in title_lower and "v-" not in title_lower:
+            return True
+        # 避免重复解析 V- 开头的详尽漏洞段落
+        if re.match(r'^v-\d+', title_lower):
+            return True
+        return False
+
     def _section_looks_like_vuln(self, title: str, body: str) -> bool:
+        if self._section_title_is_noise(title):
+            return False
         blob = (title + " " + body).lower()
         vuln_hints = [
-            "漏洞", "vuln", "cve-", "risk", "severity", "xss", "sql", "csrf",
-            "injection", "header", "cookie", "ssl", "tls", "弱", "缺失", "未设置",
-            "exposure", "misconfig", "finding", "issue", "威胁",
+            "漏洞", "vuln", "cve-", "severity", "high-risk", "medium-risk", "low-risk",
+            "xss", "sql", "csrf", "injection", "header", "cookie", "ssl", "tls", "weak", "弱",
+            "缺失", "未设置", "exposure", "misconfig", "finding", "issue", "威胁", "暴露",
         ]
-        if any(h in blob for h in vuln_hints):
-            return True
         if SEVERITY_IN_TITLE.search(title):
             return True
-        if IP_RE.search(body) or URL_RE.search(body):
-            return len(body) > 30
+        if any(h in blob for h in vuln_hints):
+            return True
         return False
 
     def _section_to_record(self, title: str, body: str, vuln_id: str = "", severity_hint: str = "") -> Optional[VulnerabilityRecord]:
@@ -432,6 +506,11 @@ class GenericMarkdownAdapter(BaseAdapter):
             else:
                 best_h, best_s = None, 0.55
                 for h in headers:
+                    lower_h = h.lower()
+                    if field == "cve" and "cve" not in normalize_key(h):
+                        continue
+                    if field == "severity" and "cvss" in lower_h:
+                        continue
                     sc = score_header(h, field)
                     if sc > best_s:
                         best_s, best_h = sc, h
@@ -495,7 +574,8 @@ class GenericMarkdownAdapter(BaseAdapter):
         """从文本中猜测主机IP和端口。"""
         url_m = URL_RE.search(text)
         if url_m:
-            return parse_host_port(url_m.group(0))
+            url = url_m.group(0).strip().strip('`"\' ).,;')
+            return parse_host_port(url)
         ip_m = IP_RE.search(text)
         if ip_m:
             host = ip_m.group(0)

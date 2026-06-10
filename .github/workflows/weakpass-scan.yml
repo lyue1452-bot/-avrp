@@ -1,0 +1,87 @@
+# ============================================================
+# 弱口令检测
+# 检查测试/部署配置中的默认密码
+# ============================================================
+name: Weak Password Check
+
+on:
+  workflow_dispatch:
+    inputs:
+      TARGET:
+        description: "检查目标 (文件路径/主机)"
+        required: true
+        default: "deploy/"
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  weakpass-check:
+    name: weakpass-check
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Check for default passwords in config files
+        id: check
+        run: |
+          python3 -c "
+import re, json, os, sys
+
+results = []
+patterns = [
+    (r'password\s*[=:]\s*[\"\\']?(admin|123456|password|root|passw0rd|P@ssw0rd|changeme|test)[\"\\']?', '弱密码'),
+    (r'PASS\w*\s*[=:]\s*[\"\\']?(admin|123456|password|root)[\"\\']?', '弱密码(环境变量)'),
+    (r'DB_PASSWORD\s*[=:]\s*[\"\\']?(admin|123456|password|root)[\"\\']?', '数据库弱密码'),
+    (r'REDIS_PASSWORD\s*[=:]\s*[\"\\']?$', 'Redis 未设置密码'),
+]
+
+target = '${{ github.event.inputs.TARGET }}'
+if os.path.isfile(target):
+    files = [target]
+elif os.path.isdir(target):
+    files = []
+    for root, dirs, fnames in os.walk(target):
+        for f in fnames:
+            if f.endswith(('.yml', '.yaml', '.env', '.conf', '.json', '.toml', '.ini')):
+                files.append(os.path.join(root, f))
+else:
+    files = []
+
+result_file = 'weakpass-report.json'
+findings = []
+for fp in files:
+    try:
+        text = open(fp, errors='replace').read()
+        for pat, desc in patterns:
+            for m in re.finditer(pat, text, re.I):
+                findings.append({
+                    'service': 'config',
+                    'host': 'local',
+                    'port': 0,
+                    'username': '',
+                    'password': m.group(1) if m.lastindex else '',
+                    'issue': desc,
+                    'file': fp,
+                })
+    except: pass
+
+json.dump(findings, open(result_file, 'w'), ensure_ascii=False, indent=2)
+print(f'Found {len(findings)} weak password issues')
+"
+
+      - name: Upload weak password report
+        uses: actions/upload-artifact@v4
+        with:
+          name: weakpass-report
+          path: weakpass-report.json
+
+      - name: Report result
+        run: |
+          if [ -f weakpass-report.json ]; then
+            COUNT=$(python3 -c "import json; d=json.load(open('weakpass-report.json')); print(len(d))")
+            echo "## Weak Password Check Results" >> "$GITHUB_STEP_SUMMARY"
+            echo "Found $COUNT potential weak/default passwords" >> "$GITHUB_STEP_SUMMARY"
+          fi

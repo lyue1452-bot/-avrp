@@ -24,7 +24,9 @@ request.interceptors.response.use(
       auth.logout()
       window.location.href = '/login'
     }
-    const msg = resp?.data?.msg || error.message || '请求失败'
+    const msg = resp?.data?.msg || (resp?.status === 500 && !resp?.data
+      ? '后端 API 未响应，请先运行: python app.py'
+      : error.message) || '请求失败'
     ElMessage.error(msg)
     return Promise.reject(error)
   }

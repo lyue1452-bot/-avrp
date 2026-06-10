@@ -1,0 +1,220 @@
+---
+- name: 数据库安全加固 — MySQL/MongoDB/Redis/PostgreSQL
+  hosts: all
+  gather_facts: yes
+  become: yes
+  vars:
+    db_type: "mysql"  # 由扫描数据传入: mysql | mongodb | redis | postgresql
+    allow_remote: false  # 是否允许远程连接（默认仅本地）
+
+  tasks:
+    # ──────────────────────────── MySQL / MariaDB ────────────────────────────
+    - name: 检测 MySQL 配置文件
+      stat:
+        path: /etc/mysql/mysql.conf.d/mysqld.cnf
+      register: mysql_cnf
+      when: db_type == "mysql"
+
+    - name: MySQL - 限制绑定地址到本地
+      lineinfile:
+        path: /etc/mysql/mysql.conf.d/mysqld.cnf
+        regexp: "^bind-address\\s*="
+        line: "bind-address = {{ '0.0.0.0' if allow_remote else '127.0.0.1' }}"
+      when: db_type == "mysql" and mysql_cnf.stat.exists
+      notify: restart mysql
+      failed_when: false
+
+    - name: MySQL - 禁用 local-infile
+      lineinfile:
+        path: /etc/mysql/mysql.conf.d/mysqld.cnf
+        regexp: "^local-infile"
+        line: "local-infile = 0"
+      when: db_type == "mysql" and mysql_cnf.stat.exists
+      notify: restart mysql
+      failed_when: false
+
+    - name: MySQL - 设置 sql_mode 严格模式
+      lineinfile:
+        path: /etc/mysql/mysql.conf.d/mysqld.cnf
+        regexp: "^sql_mode"
+        line: "sql_mode = STRICT_TRANS_TABLES,NO_ENGINE_SUBSTITUTION,NO_AUTO_CREATE_USER"
+      when: db_type == "mysql" and mysql_cnf.stat.exists
+      notify: restart mysql
+      failed_when: false
+
+    - name: MySQL - 检测 my.cnf 传统路径
+      stat:
+        path: /etc/mysql/my.cnf
+      register: mysql_my_cnf
+      when: db_type == "mysql"
+
+    - name: MySQL - my.cnf bind-address 回退
+      lineinfile:
+        path: /etc/mysql/my.cnf
+        regexp: "^bind-address\\s*="
+        line: "bind-address = {{ '0.0.0.0' if allow_remote else '127.0.0.1' }}"
+      when: db_type == "mysql" and not mysql_cnf.stat.exists and mysql_my_cnf.stat.exists
+      notify: restart mysql
+      failed_when: false
+
+    - name: MySQL - 删除 test 数据库
+      mysql_db:
+        name: test
+        state: absent
+        login_user: "{{ mysql_admin_user | default('root') }}"
+        login_password: "{{ mysql_admin_pass | default(omit) }}"
+      when: db_type == "mysql"
+      failed_when: false
+
+    # ──────────────────────────── MongoDB ────────────────────────────
+    - name: 检测 MongoDB 配置文件
+      stat:
+        path: /etc/mongod.conf
+      register: mongod_conf
+      when: db_type == "mongodb"
+
+    - name: MongoDB - 限制绑定 IP
+      lineinfile:
+        path: /etc/mongod.conf
+        regexp: "^  bindIp:"
+        line: "  bindIp: {{ '0.0.0.0' if allow_remote else '127.0.0.1' }}"
+      when: db_type == "mongodb" and mongod_conf.stat.exists
+      notify: restart mongod
+      failed_when: false
+
+    - name: MongoDB - 启用授权认证
+      lineinfile:
+        path: /etc/mongod.conf
+        regexp: "^#?security:"
+        line: "security:"
+      when: db_type == "mongodb" and mongod_conf.stat.exists
+      notify: restart mongod
+      failed_when: false
+
+    - name: MongoDB - 添加 authorization: enabled
+      blockinfile:
+        path: /etc/mongod.conf
+        insertafter: "^security:"
+        block: "  authorization: enabled"
+      when: db_type == "mongodb" and mongod_conf.stat.exists
+      notify: restart mongod
+      failed_when: false
+
+    # ──────────────────────────── Redis ────────────────────────────
+    - name: 检测 Redis 配置文件
+      stat:
+        path: /etc/redis/redis.conf
+      register: redis_conf
+      when: db_type == "redis"
+
+    - name: Redis - 限制绑定地址
+      lineinfile:
+        path: /etc/redis/redis.conf
+        regexp: "^#?bind "
+        line: "bind {{ '0.0.0.0' if allow_remote else '127.0.0.1' }}"
+      when: db_type == "redis" and redis_conf.stat.exists
+      notify: restart redis
+      failed_when: false
+
+    - name: Redis - 启用保护模式
+      lineinfile:
+        path: /etc/redis/redis.conf
+        regexp: "^#?protected-mode"
+        line: "protected-mode yes"
+      when: db_type == "redis" and redis_conf.stat.exists
+      notify: restart redis
+      failed_when: false
+
+    - name: Redis - 禁用危险命令重命名
+      lineinfile:
+        path: /etc/redis/redis.conf
+        regexp: "^#?rename-command (FLUSHALL|FLUSHDB|CONFIG|KEYS|SHUTDOWN)"
+        line: "rename-command {{ item }} \"\""
+      loop:
+        - FLUSHALL
+        - FLUSHDB
+        - CONFIG
+        - KEYS
+        - SHUTDOWN
+      when: db_type == "redis" and redis_conf.stat.exists
+      notify: restart redis
+      failed_when: false
+
+    # ──────────────────────────── PostgreSQL ────────────────────────────
+    - name: 检测 PostgreSQL 配置目录
+      stat:
+        path: /etc/postgresql
+      register: pg_dir
+      when: db_type == "postgresql"
+
+    - name: 查找 PostgreSQL 版本目录
+      find:
+        paths: /etc/postgresql
+        file_type: directory
+        max_depth: 1
+      register: pg_versions
+      when: db_type == "postgresql" and pg_dir.stat.exists
+
+    - name: PostgreSQL - 限制 pg_hba.conf 本地认证
+      lineinfile:
+        path: "{{ item }}/pg_hba.conf"
+        regexp: "^host\\s+all\\s+all\\s+0\\.0\\.0\\.0/0"
+        line: "# 已由 RayScan 加固: host all all 127.0.0.1/32 md5"
+        state: present
+      loop: "{{ pg_versions.files | map(attribute='path') | list }}"
+      when: db_type == "postgresql" and pg_versions.files | length > 0
+      notify: restart postgresql
+      failed_when: false
+
+    - name: PostgreSQL - 检测 postgresql.conf
+      stat:
+        path: "{{ item }}/postgresql.conf"
+      register: pg_conf_files
+      loop: "{{ pg_versions.files | map(attribute='path') | list }}"
+      when: db_type == "postgresql" and pg_versions.files | length > 0
+
+    - name: PostgreSQL - 限制 listen_addresses
+      lineinfile:
+        path: "{{ item }}"
+        regexp: "^#?listen_addresses\\s*="
+        line: "listen_addresses = '{{ '*' if allow_remote else 'localhost' }}'"
+      loop: "{{ pg_conf_files.results | selectattr('stat.exists') | map(attribute='item') | list }}"
+      when: db_type == "postgresql"
+      notify: restart postgresql
+      failed_when: false
+
+    # ──────────────────────────── 通用 ────────────────────────────
+    - name: 未检测到目标数据库配置
+      debug:
+        msg: "未找到 {{ db_type }} 的标准配置文件，请检查数据库是否安装或路径是否正确。云数据库（RDS 等）需在控制台手动配置。"
+      when: >
+        (db_type == "mysql" and not mysql_cnf.stat.exists and not mysql_my_cnf.stat.exists)
+        or (db_type == "mongodb" and not mongod_conf.stat.exists)
+        or (db_type == "redis" and not redis_conf.stat.exists)
+        or (db_type == "postgresql" and not pg_dir.stat.exists)
+
+  handlers:
+    - name: restart mysql
+      service:
+        name: "{{ 'mariadb' if ansible_os_family == 'RedHat' else 'mysql' }}"
+        state: restarted
+        daemon_reload: yes
+      failed_when: false
+
+    - name: restart mongod
+      service:
+        name: mongod
+        state: restarted
+      failed_when: false
+
+    - name: restart redis
+      service:
+        name: "{{ 'redis-server' if ansible_os_family == 'Debian' else 'redis' }}"
+        state: restarted
+      failed_when: false
+
+    - name: restart postgresql
+      service:
+        name: "{{ 'postgresql' if ansible_os_family == 'Debian' else 'postgresql' }}"
+        state: restarted
+      failed_when: false

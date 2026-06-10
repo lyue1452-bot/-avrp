@@ -2,12 +2,12 @@
 """兼容旧入口：导入 RayScan 报告（委托 import_report）。"""
 from config import DEFAULT_REPORT
 from import_report import import_file, main as _main
-from models import init_database
+from models import init_all_tables
 
 if __name__ == "__main__":
-    init_database()
+    init_all_tables()
     print("==============================================")
-    print(" 小钢炮 多工具漏洞导入（兼容 rayscan_import）")
+    print(" 自动化漏洞管理与修复平台 - 多工具漏洞导入")
     print("==============================================")
     stats = import_file(DEFAULT_REPORT)
     print(

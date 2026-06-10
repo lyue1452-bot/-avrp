@@ -1,0 +1,162 @@
+---
+- name: 防火墙加固 — 限制非必要端口对外开放
+  hosts: all
+  gather_facts: yes
+  become: yes
+  vars:
+    # 由扫描数据通过 extra_vars 传入
+    # allowed_ports: [22, 80, 443]    # 允许的 TCP 端口列表
+    # disallowed_ports: [21, 23, 25]  # 需关闭的端口（额外强化）
+    # close_unlisted: true            # 是否关闭未在 allowed_ports 中的服务
+    allowed_ports: [22, 80, 443]
+    disallowed_ports: []
+    close_unlisted: false
+    use_iptables: false  # 当 firewalld 不可用时回退 iptables
+
+  tasks:
+    - name: 检测 firewalld 是否可用
+      command: which firewalld
+      register: firewalld_check
+      failed_when: false
+      changed_when: false
+
+    - name: 检测 iptables 是否可用
+      command: which iptables
+      register: iptables_check
+      failed_when: false
+      changed_when: false
+      when: firewalld_check.rc != 0
+
+    # ────────────────── firewalld 方案 ──────────────────
+    - name: firewalld - 确保 firewalld 服务运行
+      service:
+        name: firewalld
+        state: started
+        enabled: yes
+      when: firewalld_check.rc == 0
+
+    - name: firewalld - 设置默认区域为 drop（默认拒绝）
+      firewalld:
+        zone: public
+        default: yes
+        state: enabled
+        permanent: yes
+      when: firewalld_check.rc == 0
+      notify: reload firewalld
+
+    - name: firewalld - 放行允许的 TCP 端口
+      firewalld:
+        port: "{{ item }}/tcp"
+        zone: public
+        permanent: yes
+        state: enabled
+      loop: "{{ allowed_ports }}"
+      when: firewalld_check.rc == 0
+      notify: reload firewalld
+
+    - name: firewalld - 显式关闭高风险端口
+      firewalld:
+        port: "{{ item }}/tcp"
+        zone: public
+        permanent: yes
+        state: disabled
+      loop: "{{ disallowed_ports }}"
+      when: firewalld_check.rc == 0 and disallowed_ports | length > 0
+      notify: reload firewalld
+
+    # ────────────────── iptables 回退方案 ──────────────────
+    - name: iptables - 设置默认策略为 DROP（INPUT）
+      iptables:
+        chain: INPUT
+        policy: DROP
+      when: firewalld_check.rc != 0 and iptables_check.rc == 0
+      failed_when: false
+
+    - name: iptables - 放行已建立连接
+      iptables:
+        chain: INPUT
+        ctstate: ESTABLISHED,RELATED
+        jump: ACCEPT
+      when: firewalld_check.rc != 0 and iptables_check.rc == 0
+      failed_when: false
+
+    - name: iptables - 放行回环接口
+      iptables:
+        chain: INPUT
+        in_interface: lo
+        jump: ACCEPT
+      when: firewalld_check.rc != 0 and iptables_check.rc == 0
+      failed_when: false
+
+    - name: iptables - 放行允许的 TCP 端口
+      iptables:
+        chain: INPUT
+        protocol: tcp
+        destination_port: "{{ item }}"
+        jump: ACCEPT
+      loop: "{{ allowed_ports }}"
+      when: firewalld_check.rc != 0 and iptables_check.rc == 0
+      failed_when: false
+
+    # ────────────────── 停止不必要的服务 ──────────────────
+    - name: 检测常见非必要服务
+      service_facts:
+
+    - name: 停止并禁用 Telnet 服务
+      service:
+        name: "{{ item }}"
+        state: stopped
+        enabled: no
+      loop:
+        - telnet
+        - xinetd
+      when:
+        - close_unlisted
+        - item in ansible_facts.services
+      failed_when: false
+      ignore_errors: yes
+
+    - name: 停止并禁用 FTP 服务
+      service:
+        name: "{{ item }}"
+        state: stopped
+        enabled: no
+      loop:
+        - vsftpd
+        - proftpd
+        - pure-ftpd
+      when:
+        - close_unlisted
+        - item in ansible_facts.services
+      failed_when: false
+      ignore_errors: yes
+
+    - name: 停止并禁用 rsh/rlogin 服务
+      service:
+        name: "{{ item }}"
+        state: stopped
+        enabled: no
+      loop:
+        - rsh
+        - rlogin
+        - rexec
+      when:
+        - close_unlisted
+        - item in ansible_facts.services
+      failed_when: false
+      ignore_errors: yes
+
+    - name: 提示人工判断
+      debug:
+        msg: >
+          防火墙规则已应用：放行了 {{ allowed_ports | join(', ') }} 端口。
+          注意：
+          1. 如果系统上运行了非标准端口的业务服务（非 22/80/443），请人工确认是否需要放行
+          2. iptables 规则在重启后可能丢失，建议保存：iptables-save > /etc/iptables/rules.v4
+          {% if not close_unlisted %}{% endif %}
+          {% if close_unlisted %}3. 已自动关闭 Telnet/FTP/rsh 服务，请确认业务未受影响。{% endif %}
+
+  handlers:
+    - name: reload firewalld
+      command: firewall-cmd --reload
+      failed_when: false

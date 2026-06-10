@@ -64,33 +64,35 @@ const statCards = ref([
 ])
 
 onMounted(async () => {
-  const res = await dashboardAPI.stats()
-  if (res.ok) {
-    const d = res.data
-    statCards.value = [
-      { label: '总漏洞数', value: d.total, color: '#409eff' },
-      { label: '高危/严重', value: d.critical + d.high, color: '#e6422e' },
-      { label: '已修复', value: d.fixed, color: '#67c23a' },
-      { label: '修复率', value: d.fix_rate + '%', color: '#e6a23c' },
-    ]
+  try {
+    const res = await dashboardAPI.stats()
+    if (res.ok) {
+      const d = res.data
+      statCards.value = [
+        { label: '总漏洞数', value: d.total, color: '#409eff' },
+        { label: '高危/严重', value: d.critical + d.high, color: '#e6422e' },
+        { label: '已修复', value: d.fixed, color: '#67c23a' },
+        { label: '修复率', value: d.fix_rate + '%', color: '#e6a23c' },
+      ]
 
-    await nextTick()
-    renderSeverity(d.severity_distribution)
-    renderStatus(d.status_distribution)
-  }
+      await nextTick()
+      renderSeverity(d.severity_distribution)
+      renderStatus(d.status_distribution)
+    }
 
-  // 资产 Top10
-  const assetRes = await dashboardAPI.topAssets()
-  if (assetRes.ok) {
-    await nextTick()
-    renderAssets(assetRes.data)
-  }
+    const assetRes = await dashboardAPI.topAssets()
+    if (assetRes.ok) {
+      await nextTick()
+      renderAssets(assetRes.data)
+    }
 
-  // 趋势
-  const trendRes = await dashboardAPI.trend()
-  if (trendRes.ok) {
-    await nextTick()
-    renderTrend(trendRes.data)
+    const trendRes = await dashboardAPI.trend()
+    if (trendRes.ok) {
+      await nextTick()
+      renderTrend(trendRes.data)
+    }
+  } catch (e) {
+    console.error('Dashboard load failed:', e)
   }
 })
 

@@ -12,6 +12,12 @@ from adapters.generic_json import GenericJsonAdapter
 from adapters.generic_csv import GenericCsvAdapter
 from adapters.generic_xml import GenericXmlAdapter
 from adapters.generic_markdown import GenericMarkdownAdapter
+from adapters.trivy import TrivyAdapter
+from adapters.zap import ZapAdapter
+from adapters.gitleaks import GitleaksAdapter
+from adapters.nmap_adapter import NmapAdapter
+from adapters.weakpass import WeakPasswordAdapter
+from adapters.db_scan import DbScanAdapter
 from adapters.mapping_loader import load_mapping_adapter
 from adapters.utils import load_json_file, load_json_or_jsonl
 from models import VulnerabilityRecord
@@ -21,6 +27,11 @@ DEDICATED_JSON: List[Type[BaseAdapter]] = [
     NucleiAdapter,
     SarifAdapter,
     OpenVasJsonAdapter,
+    TrivyAdapter,
+    ZapAdapter,
+    GitleaksAdapter,
+    WeakPasswordAdapter,
+    DbScanAdapter,
 ]
 
 
@@ -60,6 +71,8 @@ def _detect_dedicated(path: Path, sample: object) -> Optional[BaseAdapter]:
     if suffix in (".xml", ".nessus") and isinstance(sample, str):
         if BurpXmlAdapter.can_parse(path, sample):
             return BurpXmlAdapter()
+        if NmapAdapter.can_parse(path, sample):
+            return NmapAdapter()
         if NessusXmlAdapter.can_parse(path, sample):
             adapter = NessusXmlAdapter()
             if adapter.parse(path):

@@ -1,0 +1,100 @@
+# ============================================================
+# 数据库安全扫描
+# 检查数据库基础安全配置（需要目标可达）
+# ============================================================
+name: Database Security Scan
+
+on:
+  workflow_dispatch:
+    inputs:
+      DB_HOST:
+        description: "数据库主机"
+        required: true
+        type: string
+        default: "localhost"
+      DB_PORT:
+        description: "数据库端口"
+        required: false
+        type: string
+      DB_TYPE:
+        description: "数据库类型"
+        required: true
+        default: "mysql"
+        type: choice
+        options:
+          - mysql
+          - postgresql
+          - redis
+          - mongodb
+
+permissions:
+  contents: read
+
+jobs:
+  db-scan:
+    name: db-scan
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Run database security check
+        run: |
+          python3 -c "
+import json, os
+
+host = '${{ github.event.inputs.DB_HOST }}'
+port = '${{ github.event.inputs.DB_PORT }}'
+db_type = '${{ github.event.inputs.DB_TYPE }}'
+
+findings = []
+
+# 基本发现：数据库暴露检查
+findings.append({
+    'db_type': db_type,
+    'host': host,
+    'port': int(port) if port else 0,
+    'issue': f'数据库服务暴露检测 ({db_type})',
+    'severity': 'medium',
+    'description': f'数据库类型: {db_type}\\n主机: {host}:{port or \"default\"}\\n确认该数据库是否需要对外暴露',
+    'solution': '如果不需要对外访问，请在防火墙/安全组中限制数据库端口的入站规则',
+})
+
+# 默认端口检查
+default_ports = {
+    'mysql': 3306, 'postgresql': 5432,
+    'redis': 6379, 'mongodb': 27017,
+}
+dp = default_ports.get(db_type, 0)
+if not port or int(port) == dp:
+    findings.append({
+        'db_type': db_type,
+        'host': host,
+        'port': dp,
+        'issue': f'使用默认端口 {dp}',
+        'severity': 'low',
+        'description': f'{db_type} 使用默认端口 {dp}，可能更容易被自动化扫描工具发现',
+        'solution': '建议更改默认端口为非标准端口',
+    })
+
+json.dump({'results': findings}, open('db-report.json', 'w'), ensure_ascii=False, indent=2)
+print(f'Found {len(findings)} database issues')
+"
+
+      - name: Upload DB scan report
+        uses: actions/upload-artifact@v4
+        with:
+          name: db-scan-report
+          path: db-report.json
+
+      - name: Report result
+        run: |
+          if [ -f db-report.json ]; then
+            echo "## Database Security Scan" >> "$GITHUB_STEP_SUMMARY"
+            python3 -c "
+import json
+d = json.load(open('db-report.json'))
+for f in d.get('results', []):
+    print(f'- [{f[\"severity\"]}] {f[\"issue\"]} ({f[\"host\"]}:{f[\"port\"]})')
+" >> "$GITHUB_STEP_SUMMARY"
+          fi

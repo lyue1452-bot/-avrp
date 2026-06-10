@@ -4,12 +4,17 @@ from datetime import datetime, timedelta
 from flask import Blueprint, jsonify
 from flask_jwt_extended import jwt_required
 
-from models import get_connection
+from models import get_connection, init_all_tables
 
 dashboard_bp = Blueprint("dashboard", __name__, url_prefix="/dashboard")
 
 
+def _ensure_db():
+    init_all_tables()
+
+
 def _query_json(sql: str, params=None):
+    _ensure_db()
     conn = get_connection()
     rows = conn.execute(sql, params or []).fetchall()
     conn.close()
@@ -17,6 +22,7 @@ def _query_json(sql: str, params=None):
 
 
 def _scalar(sql: str, params=None):
+    _ensure_db()
     conn = get_connection()
     row = conn.execute(sql, params or []).fetchone()
     conn.close()

@@ -1,5 +1,5 @@
 # ============================================================
-# Kubernetes Deployment — 小钢炮漏洞管理平台
+# Kubernetes Deployment — 自动化漏洞管理与修复平台
 # ============================================================
 apiVersion: apps/v1
 kind: Deployment
@@ -49,13 +49,13 @@ spec:
                 - ALL
           livenessProbe:
             httpGet:
-              path: /api/health
+              path: /api/pipeline/health
               port: 5000
             initialDelaySeconds: 30
             periodSeconds: 10
           readinessProbe:
             httpGet:
-              path: /api/health
+              path: /api/pipeline/health
               port: 5000
             initialDelaySeconds: 5
             periodSeconds: 5

@@ -21,6 +21,7 @@
           <el-button @click="resetFilters">重置</el-button>
         </el-col>
         <el-col :span="6" style="text-align:right">
+          <el-button @click="reclassifyAll" :loading="reclassifying">重匹配规则</el-button>
           <el-button type="success" :disabled="!selectedIds.length" @click="batchFix">
             批量修复 ({{ selectedIds.length }})
           </el-button>
@@ -54,7 +55,7 @@
         <el-table-column label="操作" width="180" fixed="right">
           <template #default="{ row }">
             <el-button size="small" @click="showDetail(row.id)">详情</el-button>
-            <el-button size="small" type="danger" :disabled="!row.auto_fixable" @click="fixOne(row.id)">修复</el-button>
+            <el-button size="small" type="danger" @click="fixOne(row.id)">修复</el-button>
           </template>
         </el-table-column>
       </el-table>
@@ -112,6 +113,7 @@ const filters = ref({ severity: [], fix_status: [] })
 const selectedIds = ref([])
 const detailVisible = ref(false)
 const detail = ref(null)
+const reclassifying = ref(false)
 
 onMounted(loadData)
 
@@ -173,6 +175,17 @@ async function showDetail(id) {
   if (res.ok) {
     detail.value = res.data
     detailVisible.value = true
+  }
+}
+
+async function reclassifyAll() {
+  reclassifying.value = true
+  try {
+    const res = await vulnAPI.reclassify({})
+    ElMessage({ type: res.ok ? 'success' : 'error', message: res.msg })
+    if (res.ok) loadData()
+  } finally {
+    reclassifying.value = false
   }
 }
 

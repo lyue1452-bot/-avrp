@@ -41,13 +41,20 @@ def parse_host_port(url_or_host: str, default_port: int = 80) -> Tuple[str, int]
         return "unknown", default_port
     if "://" not in url_or_host:
         url_or_host = f"http://{url_or_host}"
-    parsed = urlparse(url_or_host)
+    # 去除可能的 Markdown 尾部标点和反引号
+    url_or_host = url_or_host.strip().strip('`"\' ).,;')
+    try:
+        parsed = urlparse(url_or_host)
+    except Exception:
+        parsed = urlparse(f"http://{url_or_host}")
     host = parsed.hostname or parsed.path.split(":")[0] or "unknown"
-    if parsed.port:
-        port = parsed.port
-    elif parsed.scheme == "https":
-        port = 443
-    else:
+    port = default_port
+    try:
+        if parsed.port:
+            port = parsed.port
+        elif parsed.scheme == "https":
+            port = 443
+    except ValueError:
         port = default_port
     return host, port
 

@@ -2,8 +2,8 @@
   <div class="login-page">
     <div class="login-card">
       <h2 class="login-title">
-        <el-icon :size="28" style="vertical-align:middle"><Shield /></el-icon>
-        小钢炮漏洞管理平台
+        <el-icon :size="28" style="vertical-align:middle"><Lock /></el-icon>
+        自动化漏洞管理与修复平台
       </h2>
       <p class="login-desc">漏洞管理与自动化修复系统</p>
 

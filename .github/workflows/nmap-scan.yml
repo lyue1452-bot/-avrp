@@ -1,0 +1,72 @@
+# ============================================================
+# nmap 网络扫描 — 资产发现与端口暴露检测
+# 手动触发：扫描目标网段，发现开放端口和服务
+# ============================================================
+name: Nmap Network Scan
+
+on:
+  workflow_dispatch:
+    inputs:
+      TARGET:
+        description: "扫描目标 (IP/网段/域名)"
+        required: true
+        type: string
+        default: "192.168.1.0/24"
+      SCAN_TYPE:
+        description: "扫描类型"
+        required: true
+        default: "quick"
+        type: choice
+        options:
+          - quick (常见端口)
+          - full (全端口)
+
+permissions:
+  contents: read
+
+jobs:
+  nmap-scan:
+    name: nmap-scan
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install nmap
+        run: sudo apt-get update && sudo apt-get install -y nmap
+
+      - name: Run nmap scan
+        run: |
+          if [ "${{ github.event.inputs.SCAN_TYPE }}" = "full" ]; then
+            nmap -p- -sV -sC -O -oX nmap-report.xml ${{ github.event.inputs.TARGET }}
+          else
+            nmap -sS -sV --top-ports 1000 -O -oX nmap-report.xml ${{ github.event.inputs.TARGET }}
+          fi
+
+      - name: Upload nmap report
+        uses: actions/upload-artifact@v4
+        with:
+          name: nmap-report
+          path: nmap-report.xml
+
+      - name: Report result
+        run: |
+          echo "## Nmap Scan Results" >> "$GITHUB_STEP_SUMMARY"
+          echo "Target: ${{ github.event.inputs.TARGET }}" >> "$GITHUB_STEP_SUMMARY"
+          # 提取开放端口数量
+          python3 -c "
+import xml.etree.ElementTree as ET
+tree = ET.parse('nmap-report.xml')
+root = tree.getroot()
+hosts = root.findall('.//host')
+open_ports = 0
+for host in hosts:
+    for port in host.findall('.//port'):
+        state = port.find('state')
+        if state is not None and state.get('state') == 'open':
+            open_ports += 1
+            svc = port.find('service')
+            svc_name = svc.get('name', 'unknown') if svc is not None else 'unknown'
+            print(f'  Port {port.get(\"portid\")}/{port.get(\"protocol\",\"tcp\")} - {svc_name}')
+print(f'\\nTotal open ports: {open_ports}')
+" >> "$GITHUB_STEP_SUMMARY"

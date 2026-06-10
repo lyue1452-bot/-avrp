@@ -20,6 +20,7 @@ export const vulnAPI = {
   delete: (id) => request.delete(`/api/vulns/${id}`),
   fix: (id) => request.post(`/api/vulns/${id}/fix`),
   batchFix: (ids) => request.post('/api/vulns/batch-fix', { ids }),
+  reclassify: (data) => request.post('/api/vulns/reclassify', data || {}),
 }
 
 export const taskAPI = {
@@ -49,4 +50,20 @@ export const userAPI = {
   update: (id, data) => request.put(`/api/users/${id}`, data),
   delete: (id) => request.delete(`/api/users/${id}`),
   resetPassword: (id, password) => request.put(`/api/users/${id}/password`, { password }),
+}
+
+export const pipelineAPI = {
+  runs: (params) => request.get('/api/pipeline/runs', { params }),
+  runDetail: (id) => request.get(`/api/pipeline/runs/${id}`),
+  deleteRun: (id) => request.delete(`/api/pipeline/runs/${id}`),
+  ingest: (data) => request.post('/api/pipeline/ingest', data),
+  // 统一扫描
+  tools: () => request.get('/api/pipeline/tools'),
+  installTools: (data) => request.post('/api/pipeline/tools/install', data || {}),
+  createScan: (data) => request.post('/api/pipeline/scan', data),
+  scanStatus: (jobId) => request.get(`/api/pipeline/scan/${jobId}`),
+  cancelScan: (jobId) => request.get(`/api/pipeline/scan/${jobId}/cancel`),
+  scanJobs: (params) => request.get('/api/pipeline/scan-jobs', { params }),
+  scanJobVulns: (id) => request.get(`/api/pipeline/scan-jobs/${id}/vulns`),
+  deleteScanJob: (id) => request.delete(`/api/pipeline/scan-jobs/${id}`),
 }
