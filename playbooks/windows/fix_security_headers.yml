@@ -1,0 +1,8 @@
+---
+- name: Windows HTTP 安全响应头
+  hosts: all
+  gather_facts: no
+  tasks:
+    - name: 部署 Apache 安全头与 .htaccess
+      raw: powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File D:/rayscan/scripts/win_fix/fix_security_headers.ps1
+      changed_when: true

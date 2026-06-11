@@ -1,0 +1,36 @@
+---
+- name: Windows OpenSSH 基础加固
+  hosts: all
+  gather_facts: no
+  tasks:
+    - name: 加固 sshd_config
+      raw: |
+        $path = 'C:\ProgramData\ssh\sshd_config'
+        if (-not (Test-Path $path)) { Write-Output 'sshd_config not found'; exit 1 }
+        $pairs = @{
+          'PermitRootLogin' = 'prohibit-password'
+          'PermitEmptyPasswords' = 'no'
+          'PasswordAuthentication' = 'yes'
+          'PubkeyAuthentication' = 'yes'
+        }
+        $lines = Get-Content $path
+        foreach ($k in $pairs.Keys) {
+          $v = $pairs[$k]
+          $found = $false
+          for ($i=0; $i -lt $lines.Count; $i++) {
+            if ($lines[$i] -match "^\s*#?\s*$k\s") {
+              $lines[$i] = "$k $v"
+              $found = $true
+              break
+            }
+          }
+          if (-not $found) { $lines += "$k $v" }
+        }
+        Set-Content -Path $path -Value $lines -Encoding ASCII
+        Write-Output 'sshd_config updated'
+      changed_when: true
+
+    - name: 重启 sshd
+      raw: Restart-Service sshd -Force
+      changed_when: true
+      failed_when: false

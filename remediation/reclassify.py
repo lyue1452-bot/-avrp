@@ -35,7 +35,9 @@ def reclassify_row(row, conn=None) -> bool:
         return False
 
     fix_status = row["fix_status"] or "pending"
-    if auto and fix_status in ("manual_only", "pending"):
+    if fix_status == "fixed":
+        pass  # 已修复不因重分类降级
+    elif auto and fix_status in ("manual_only", "pending"):
         fix_status = "auto_fixable"
     elif not auto and fix_status == "auto_fixable":
         fix_status = "manual_only"

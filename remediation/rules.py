@@ -15,6 +15,12 @@ class RemediationRule:
     priority: int = 100
     manual_only: bool = False
     verify_type: str = ""  # http_header, ping, none
+    playbook_windows: str = ""  # Windows 专用剧本（相对 playbooks/）
+
+
+def get_playbook_for_target(rule: RemediationRule, asset_ip: str) -> str:
+    from remediation.target_os import resolve_playbook
+    return resolve_playbook(rule, asset_ip)
 
 
 # 规则按 priority 升序匹配（数字越小越优先）
@@ -26,6 +32,7 @@ REMEDIATION_RULES: List[RemediationRule] = [
         ["server 信息泄露", "server banner", "server 版本", "apache 版本", "禁止 apach", "server 头", "版本信息泄漏", "服务器版本"],
         priority=20,
         verify_type="http_header",
+        playbook_windows="windows/fix_server_tokens.yml",
     ),
     RemediationRule(
         "security_headers_bundle",
@@ -39,6 +46,7 @@ REMEDIATION_RULES: List[RemediationRule] = [
         ],
         priority=30,
         verify_type="http_header",
+        playbook_windows="windows/fix_security_headers.yml",
     ),
     RemediationRule(
         "cookie_samesite",
@@ -47,6 +55,7 @@ REMEDIATION_RULES: List[RemediationRule] = [
         ["samesite", "same-site", "cookie未配置"],
         priority=40,
         verify_type="http_header",
+        playbook_windows="windows/fix_cookie_headers.yml",
     ),
     RemediationRule(
         "cookie_secure_httponly",
@@ -55,6 +64,7 @@ REMEDIATION_RULES: List[RemediationRule] = [
         ["httponly", "secure.*cookie", "cookie.*secure", "cookie 未设置 secure"],
         priority=41,
         verify_type="http_header",
+        playbook_windows="windows/fix_cookie_headers.yml",
     ),
     RemediationRule(
         "tls_ssl_config",
@@ -66,6 +76,7 @@ REMEDIATION_RULES: List[RemediationRule] = [
         ],
         priority=50,
         verify_type="none",
+        playbook_windows="windows/fix_tls_hardening.yml",
     ),
     RemediationRule(
         "http_to_https",
@@ -76,8 +87,8 @@ REMEDIATION_RULES: List[RemediationRule] = [
             "用户认证信息明文",
         ],
         priority=60,
-        manual_only=True,  # 需证书，默认仅提示
         verify_type="none",
+        playbook_windows="windows/fix_force_https.yml",
     ),
     RemediationRule(
         "ssh_hardening",
@@ -86,6 +97,7 @@ REMEDIATION_RULES: List[RemediationRule] = [
         ["ssh", "root 登录", "弱算法", "openssh", "暴露的 ssh"],
         priority=70,
         verify_type="none",
+        playbook_windows="windows/fix_ssh_hardening.yml",
     ),
     RemediationRule(
         "directory_listing",
@@ -94,6 +106,7 @@ REMEDIATION_RULES: List[RemediationRule] = [
         ["目录浏览", "directory listing", "index of", "默认目录"],
         priority=80,
         verify_type="none",
+        playbook_windows="windows/fix_directory_listing.yml",
     ),
     RemediationRule(
         "brute_force_login",
@@ -101,8 +114,8 @@ REMEDIATION_RULES: List[RemediationRule] = [
         "fix_rate_limit.yml",
         ["暴力猜解", "brute force", "bruteforce", "登录表单", "account lockout"],
         priority=200,
-        manual_only=True,
         verify_type="none",
+        playbook_windows="windows/fix_rate_limit.yml",
     ),
     RemediationRule(
         "container_vuln_patch",
@@ -127,6 +140,7 @@ REMEDIATION_RULES: List[RemediationRule] = [
         ["弱口令", "弱密码", "默认密码", "weak.*pass", "brute.*force", "登录暴力", "hydra", "暴露的.*服务"],
         priority=170,
         verify_type="none",
+        playbook_windows="windows/fix_firewall_hardening.yml",
     ),
     RemediationRule(
         "database_misconfig",
@@ -134,8 +148,9 @@ REMEDIATION_RULES: List[RemediationRule] = [
         "fix_database_hardening.yml",
         ["数据库", "mysql", "redis", "mongodb", "postgres", "未授权访问",
          "database", "弱口令.*数据库", "默认.*数据库", "数据服务暴露", "数据库/数据"],
-        priority=180,
+        priority=165,
         verify_type="none",
+        playbook_windows="windows/fix_database_hardening.yml",
     ),
     RemediationRule(
         "open_port_exposure",
@@ -145,6 +160,7 @@ REMEDIATION_RULES: List[RemediationRule] = [
          "暴露的", "暴露", "smb", "445"],
         priority=190,
         verify_type="none",
+        playbook_windows="windows/fix_firewall_hardening.yml",
     ),
     RemediationRule(
         "generic_connectivity",
@@ -153,6 +169,7 @@ REMEDIATION_RULES: List[RemediationRule] = [
         [".*"],
         priority=9999,
         verify_type="ping",
+        playbook_windows="windows/fix_connectivity.yml",
     ),
 ]
 

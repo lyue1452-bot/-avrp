@@ -1,0 +1,8 @@
+---
+- name: Windows HTTP 强制跳转 HTTPS（自签证书）
+  hosts: all
+  gather_facts: no
+  tasks:
+    - name: 启用 HTTPS、443 监听与 HTTP 301 重定向
+      raw: powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File D:/rayscan/scripts/win_fix/enable_https_redirect.ps1
+      changed_when: true

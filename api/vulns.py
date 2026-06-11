@@ -4,14 +4,11 @@ from flask_jwt_extended import jwt_required, get_jwt_identity
 
 from models import (
     get_connection, get_vulnerability, update_fix_status,
-    create_task, update_task_status,
 )
+from remediation.fix_status import enrich_vuln, STATUS_OPTIONS, status_label
 from remediation.rules import REMEDIATION_RULES, match_remediation, classify_record
-from remediation.executor import run_playbook, ansible_runtime_info
-from remediation.verify import verify_fix
-from remediation.fix_context import build_extra_vars, extra_vars_to_cli
+from remediation.fix_runner import run_vuln_fix
 from remediation.reclassify import reclassify_vulnerabilities, reclassify_row, row_to_record
-from config import VERIFY_AFTER_FIX
 
 vulns_bp = Blueprint("vulns", __name__, url_prefix="/vulns")
 
@@ -68,11 +65,15 @@ def list_vulns():
 
     return jsonify({
         "ok": True,
-        "data": [dict(r) for r in rows],
+        "data": [enrich_vuln(dict(r)) for r in rows],
         "total": total,
         "page": page,
         "per_page": per_page,
-        "filters": {"severity": levels, "fix_status": statuses},
+        "filters": {
+            "severity": levels,
+            "fix_status": STATUS_OPTIONS,
+            "fix_status_values": statuses,
+        },
     })
 
 
@@ -82,7 +83,7 @@ def vuln_detail(vuln_id):
     row = get_vulnerability(vuln_id)
     if not row:
         return jsonify({"ok": False, "msg": "漏洞不存在"}), 404
-    return jsonify({"ok": True, "data": dict(row)})
+    return jsonify({"ok": True, "data": enrich_vuln(dict(row))})
 
 
 @vulns_bp.route("/<int:vuln_id>", methods=["PUT"])
@@ -167,29 +168,9 @@ def fix_single(vuln_id):
     rule = next((r for r in REMEDIATION_RULES if r.rule_id == rule_id), None) or rule
 
     uid = int(get_jwt_identity())
-    task_id = create_task(vuln_id, rule.rule_id, row["asset_ip"], row["url"], created_by=str(uid))
-    update_task_status(task_id, "running")
-    update_fix_status(vuln_id, "fixing", "执行中...")
-
-    extra = extra_vars_to_cli(build_extra_vars(row))
-    ok, output = run_playbook(rule, row["asset_ip"], extra_vars=extra)
-
-    runtime = ansible_runtime_info()
-    if runtime.get("mode") == "simulate":
-        output = f"[{runtime['label']}] {output}"
-
-    if ok and VERIFY_AFTER_FIX and runtime.get("mode") != "simulate":
-        v_ok, v_msg = verify_fix(rule, row["url"], row["asset_ip"])
-        output += f"\n验证: {v_msg}"
-        if not v_ok:
-            update_task_status(task_id, "failed", output)
-            update_fix_status(vuln_id, "failed", output)
-            return jsonify({"ok": False, "msg": f"剧本已执行但验证未通过：{v_msg}", "task_id": task_id})
-
-    status = "success" if ok else "failed"
-    update_task_status(task_id, status, output)
-    fix_st = "fixed" if ok else "failed"
-    update_fix_status(vuln_id, fix_st, output)
+    ok, task_id, output = run_vuln_fix(
+        row, rule, created_by=str(uid), source="manual",
+    )
 
     return jsonify({
         "ok": ok,
@@ -223,15 +204,9 @@ def batch_fix():
         rule = next((r for r in REMEDIATION_RULES if r.rule_id == rule_id), None) or rule
 
         uid = int(get_jwt_identity())
-        task_id = create_task(vid, rule.rule_id, row["asset_ip"], row["url"], created_by=str(uid))
-        update_task_status(task_id, "running")
-        update_fix_status(vid, "fixing", "执行中...")
-
-        extra = extra_vars_to_cli(build_extra_vars(row))
-        ok, output = run_playbook(rule, row["asset_ip"], extra_vars=extra)
-        status = "success" if ok else "failed"
-        update_task_status(task_id, status, output)
-        update_fix_status(vid, "fixed" if ok else "failed", output)
+        ok, task_id, _ = run_vuln_fix(
+            row, rule, created_by=str(uid), source="batch",
+        )
         results.append({"id": vid, "ok": ok, "task_id": task_id})
 
     return jsonify({"ok": True, "results": results})

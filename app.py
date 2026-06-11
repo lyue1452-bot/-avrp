@@ -13,7 +13,7 @@ from models import (
 )
 from remediation.rules import REMEDIATION_RULES, match_remediation
 from remediation.executor import run_playbook, ansible_runtime_info
-from remediation.verify import verify_fix
+from remediation.fix_status import status_label
 from config import VERIFY_AFTER_FIX
 
 
@@ -107,6 +107,7 @@ def create_app():
             cur_severity=severity,
             cur_status=status,
             ansible_info=ansible_runtime_info(),
+            status_label=status_label,
         )
 
     @app.route("/import", methods=["POST"])
@@ -266,7 +267,7 @@ _OLD_HTML_TEMPLATE = '''
                 <td><span class="tag">{{ v.remediation_rule or '-' }}</span></td>
                 <td>
                     <span class="tag {{ 'ok' if v.fix_status=='fixed' else 'warn' if v.fix_status=='auto_fixable' else 'err' if v.fix_status=='failed' else '' }}">
-                        {{ v.fix_status }}
+                        {{ status_label(v.fix_status) }}
                     </span>
                 </td>
                 <td>
@@ -324,6 +325,14 @@ _OLD_HTML_TEMPLATE = '''
 
 
 if __name__ == "__main__":
+    import os
+    import sys
+
+    if sys.platform.startswith("win"):
+        os.environ.setdefault("RAYSCAN_ANSIBLE_MODE", "wsl")
+        os.environ.setdefault("RAYSCAN_SIMULATE_ON_WINDOWS", "0")
+        os.environ.setdefault("RAYSCAN_TARGET_OS", "windows")
+
     init_all_tables()
     app = create_app()
     print(f"后端 API: http://127.0.0.1:{API_PORT}/api/health")

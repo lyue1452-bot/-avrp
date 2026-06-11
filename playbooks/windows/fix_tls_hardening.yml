@@ -1,0 +1,10 @@
+---
+- name: Windows TLS 基础提示（需证书时人工完成 HTTPS）
+  hosts: all
+  gather_facts: no
+  tasks:
+    - name: 输出 TLS 加固说明
+      raw: |
+        Write-Output 'Windows TLS: 请在 IIS 证书绑定或 Apache httpd-ssl.conf 中禁用 TLS1.0/1.1，并配置有效证书。'
+        Write-Output 'RayScan 已记录该漏洞；完整 HTTPS 迁移需人工提供证书。'
+      changed_when: false

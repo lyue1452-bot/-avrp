@@ -91,6 +91,10 @@
         <el-icon style="vertical-align:middle"><SuccessFilled /></el-icon>
         {{ activeJob.summary }}
       </div>
+      <div v-if="activeJob.results?.auto_fix" style="margin-top:8px;padding:8px 12px;background:#ecf5ff;border-radius:4px;font-size:13px">
+        自动修复：成功 {{ activeJob.results.auto_fix.fixed || 0 }} / {{ activeJob.results.auto_fix.total || 0 }} 条
+        <span v-if="activeJob.results.auto_fix.task_ids?.length">（已创建 {{ activeJob.results.auto_fix.task_ids.length }} 个任务）</span>
+      </div>
     </el-card>
 
     <!-- ──────── 扫描历史 + 流水线记录 ──────── -->
@@ -207,6 +211,10 @@
           <el-descriptions-item label="开始时间">{{ detailJob.started_at || '-' }}</el-descriptions-item>
           <el-descriptions-item label="结束时间">{{ detailJob.finished_at || '-' }}</el-descriptions-item>
           <el-descriptions-item label="结果摘要" :span="2">{{ detailJob.summary || '-' }}</el-descriptions-item>
+          <el-descriptions-item v-if="detailJob.results?.auto_fix" label="自动修复" :span="2">
+            成功 {{ detailJob.results.auto_fix.fixed || 0 }} / {{ detailJob.results.auto_fix.total || 0 }} 条
+            <el-button size="small" link type="primary" @click="router.push('/tasks')">查看任务</el-button>
+          </el-descriptions-item>
         </el-descriptions>
 
         <div style="font-weight:600;margin-bottom:8px">各工具执行结果</div>
@@ -221,7 +229,9 @@
             <template #default="{ row }">
               <span v-if="row.result && !row.error" style="font-size:13px">
                 发现 {{ row.result.total }} 条
-                <template v-if="row.result.auto_fixable != null">，可修复 {{ row.result.auto_fixable }} 条</template>
+                <template v-if="row.result.needs_fix != null">，待修复 {{ row.result.needs_fix }} 条</template>
+                <template v-else-if="row.result.auto_fixable != null">，可修复 {{ row.result.auto_fixable }} 条</template>
+                <template v-if="row.result.already_fixed">，已修复 {{ row.result.already_fixed }} 条</template>
                 <template v-if="row.result.fixed != null">，已修复 {{ row.result.fixed }}/{{ row.result.total }} 条</template>
               </span>
               <span v-else-if="row.error" style="color:#e6422e;font-size:13px">{{ row.error }}</span>
@@ -231,7 +241,12 @@
         </el-table>
 
         <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
-          <span style="font-weight:600">关联漏洞（{{ detailJob.target }}）</span>
+          <span style="font-weight:600">
+            关联漏洞（{{ detailJob.target }}）
+            <span v-if="detailVulnSummary" style="font-weight:400;color:#909399;font-size:12px;margin-left:8px">
+              已修复 {{ detailVulnSummary.fixed }} · 待修复 {{ detailVulnSummary.needs_fix }}
+            </span>
+          </span>
           <el-button size="small" @click="loadDetailVulns(detailJob.id)" :loading="loadingDetailVulns">刷新</el-button>
         </div>
         <el-table :data="detailVulns" stripe size="small" v-loading="loadingDetailVulns" max-height="260">
@@ -243,7 +258,13 @@
               <el-tag :type="row.auto_fixable ? 'success' : 'info'" size="small">{{ row.auto_fixable ? '是' : '否' }}</el-tag>
             </template>
           </el-table-column>
-          <el-table-column prop="fix_status" label="状态" width="90" />
+          <el-table-column label="状态" width="100">
+            <template #default="{ row }">
+              <el-tag :type="fixStatusType(row.fix_status)" size="small">
+                {{ row.fix_status_label || fixStatusLabel(row.fix_status) }}
+              </el-tag>
+            </template>
+          </el-table-column>
         </el-table>
       </template>
     </el-dialog>
@@ -252,8 +273,12 @@
 
 <script setup>
 import { ref, computed, onMounted, onUnmounted } from 'vue'
+import { useRouter } from 'vue-router'
 import { pipelineAPI } from '../../api/auth'
+import { fixStatusLabel, fixStatusType } from '../../utils/fixStatus'
 import { ElMessage, ElMessageBox } from 'element-plus'
+
+const router = useRouter()
 
 // ── 工具列表 ──
 const availableTools = ref([])
@@ -449,6 +474,7 @@ async function deleteScanJob(id) {
 const detailVisible = ref(false)
 const detailJob = ref(null)
 const detailVulns = ref([])
+const detailVulnSummary = ref(null)
 const loadingDetailVulns = ref(false)
 
 const detailToolList = computed(() => {
@@ -485,7 +511,10 @@ async function loadDetailVulns(jobId) {
   loadingDetailVulns.value = true
   try {
     const res = await pipelineAPI.scanJobVulns(jobId)
-    if (res.ok) detailVulns.value = res.data
+    if (res.ok) {
+      detailVulns.value = res.data
+      detailVulnSummary.value = res.summary || null
+    }
   } finally {
     loadingDetailVulns.value = false
   }

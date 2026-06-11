@@ -1,0 +1,23 @@
+---
+- name: Windows Apache 禁止目录浏览
+  hosts: all
+  gather_facts: no
+  tasks:
+    - name: Options -Indexes
+      raw: |
+        $snippet = @'
+        <Directory />
+          Options -Indexes
+        </Directory>
+        '@
+        $roots = @('C:\xampp\apache\conf','C:\Apache24\conf')
+        foreach ($root in $roots) {
+          if (-not (Test-Path $root)) { continue }
+          $conf = Join-Path $root 'extra\rayscan-no-index.conf'
+          Set-Content -Path $conf -Value $snippet -Encoding UTF8
+          $httpd = Join-Path $root 'httpd.conf'
+          if ((Get-Content $httpd -Raw) -notmatch 'rayscan-no-index') {
+            Add-Content -Path $httpd -Value "`nInclude conf/extra/rayscan-no-index.conf"
+          }
+        }
+      changed_when: true

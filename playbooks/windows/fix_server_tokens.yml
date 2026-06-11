@@ -1,0 +1,8 @@
+---
+- name: Windows Apache Server 版本信息隐藏
+  hosts: all
+  gather_facts: no
+  tasks:
+    - name: 设置 ServerTokens Prod 并重启 Apache
+      raw: powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File D:/rayscan/scripts/win_fix/fix_server_tokens.ps1
+      changed_when: true

@@ -12,6 +12,7 @@ from models import (
     add_pipeline_run, list_pipeline_runs, get_pipeline_run, delete_pipeline_run,
     list_scan_jobs, delete_scan_job,
 )
+from remediation.fix_status import enrich_vuln
 from remediation.rules import classify_record
 from scanner.orchestrator import (
     start_scan, get_scan_status, cancel_scan,
@@ -161,6 +162,28 @@ def list_tools():
     return jsonify({"ok": True, "data": available})
 
 
+@pipeline_bp.route("/ansible/status")
+@jwt_required()
+def ansible_status():
+    """Ansible 运行时状态（供设置页展示）。"""
+    from remediation.executor import get_ansible_runtime
+    from config import ANSIBLE_USER, ANSIBLE_MODE, TARGET_OS
+    from remediation.target_os import detect_target_os
+    info = get_ansible_runtime()
+    sample_ip = request.args.get("asset_ip", "192.168.101.36")
+    return jsonify({
+        "ok": True,
+        "data": {
+            **info,
+            "ansible_user": ANSIBLE_USER,
+            "ansible_mode_env": ANSIBLE_MODE,
+            "target_os_env": TARGET_OS,
+            "detected_os": detect_target_os(sample_ip),
+            "setup_hint": "以管理员运行 scripts/setup_ssh_for_ansible.ps1 配置 SSH 免密",
+        },
+    })
+
+
 @pipeline_bp.route("/tools/install", methods=["POST"])
 @jwt_required()
 def install_tools():
@@ -243,7 +266,7 @@ def scan_job_delete(job_id):
 @pipeline_bp.route("/scan-jobs/<int:job_id>/vulns")
 @jwt_required()
 def scan_job_vulns(job_id):
-    """扫描任务关联漏洞（按目标 IP）。"""
+    """扫描任务关联漏洞（按目标 IP，展示当前库内状态）。"""
     job = get_scan_status(job_id)
     if not job:
         return jsonify({"ok": False, "msg": "扫描任务不存在"}), 404
@@ -254,5 +277,23 @@ def scan_job_vulns(job_id):
         "FROM vulnerabilities WHERE asset_ip=? ORDER BY id DESC LIMIT 100",
         (host,),
     ).fetchall()
+    summary = conn.execute(
+        """
+        SELECT
+          SUM(CASE WHEN fix_status='fixed' THEN 1 ELSE 0 END) AS fixed_cnt,
+          SUM(CASE WHEN fix_status IN ('auto_fixable','pending','failed','fixing') AND auto_fixable=1 THEN 1 ELSE 0 END) AS needs_fix_cnt
+        FROM vulnerabilities WHERE asset_ip=?
+        """,
+        (host,),
+    ).fetchone()
     conn.close()
-    return jsonify({"ok": True, "data": [dict(r) for r in rows], "asset_ip": host})
+    data = [enrich_vuln(dict(r)) for r in rows]
+    return jsonify({
+        "ok": True,
+        "data": data,
+        "asset_ip": host,
+        "summary": {
+            "fixed": int(summary["fixed_cnt"] or 0),
+            "needs_fix": int(summary["needs_fix_cnt"] or 0),
+        },
+    })

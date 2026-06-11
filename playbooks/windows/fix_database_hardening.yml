@@ -1,0 +1,63 @@
+---
+- name: Windows 数据库暴露加固
+  hosts: all
+  gather_facts: no
+  vars:
+    db_type: mysql
+    allow_remote: false
+  tasks:
+    - name: MySQL 限制 bind-address + 防火墙
+      raw: |
+        $bind = '{{ "0.0.0.0" if allow_remote else "127.0.0.1" }}'
+        $candidates = @(
+          'C:\xampp\mysql\bin\my.ini',
+          'C:\ProgramData\MySQL\MySQL Server 8.0\my.ini',
+          'C:\ProgramData\MySQL\MySQL Server 5.7\my.ini'
+        )
+        $updated = $false
+        foreach ($ini in $candidates) {
+          if (-not (Test-Path $ini)) { continue }
+          $text = Get-Content $ini -Raw
+          if ($text -match '(?m)^bind-address\s*=') {
+            $text = $text -replace '(?m)^bind-address\s*=.*', "bind-address=$bind"
+          } else {
+            $text += "`nmysqld`nbind-address=$bind`n"
+          }
+          Set-Content -Path $ini -Value $text -Encoding UTF8
+          $updated = $true
+          Write-Output "Updated $ini bind-address=$bind"
+        }
+        if (-not $updated) { Write-Output 'WARN: my.ini not found' }
+        $name = 'RayScan-Block-In-TCP-3306'
+        if (-not (Get-NetFirewallRule -DisplayName $name -ErrorAction SilentlyContinue)) {
+          New-NetFirewallRule -DisplayName $name -Direction Inbound -Action Block -Protocol TCP -LocalPort 3306 | Out-Null
+          Write-Output 'Firewall block 3306 applied'
+        }
+        foreach ($svc in @('MySQL','MySQL80','mysql','xamppmysql')) {
+          if (Get-Service -Name $svc -ErrorAction SilentlyContinue) {
+            Restart-Service $svc -Force -ErrorAction SilentlyContinue
+          }
+        }
+      when: db_type == 'mysql'
+      changed_when: true
+
+    - name: MSSQL 阻断外网 1433
+      raw: |
+        $name = 'RayScan-Block-In-TCP-1433'
+        if (-not (Get-NetFirewallRule -DisplayName $name -ErrorAction SilentlyContinue)) {
+          New-NetFirewallRule -DisplayName $name -Direction Inbound -Action Block -Protocol TCP -LocalPort 1433 | Out-Null
+        }
+        Write-Output 'MSSQL port 1433 inbound blocked'
+      when: db_type == 'mssql'
+      changed_when: true
+
+    - name: Redis/MongoDB 端口入站阻断
+      raw: |
+        $port = {{ 6379 if db_type == 'redis' else 27017 }}
+        $name = "RayScan-Block-In-TCP-$port"
+        if (-not (Get-NetFirewallRule -DisplayName $name -ErrorAction SilentlyContinue)) {
+          New-NetFirewallRule -DisplayName $name -Direction Inbound -Action Block -Protocol TCP -LocalPort $port | Out-Null
+        }
+        Write-Output "Blocked inbound $port"
+      when: db_type == 'redis' or db_type == 'mongodb'
+      changed_when: true

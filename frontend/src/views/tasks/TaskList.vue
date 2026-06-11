@@ -13,14 +13,15 @@
         </div>
       </template>
 
-      <el-table :data="tasks" stripe v-loading="loading">
+        <el-table :data="tasks" stripe v-loading="loading">
         <el-table-column prop="id" label="ID" width="60" />
         <el-table-column prop="vuln_id" label="漏洞ID" width="70" />
+        <el-table-column prop="vuln_name" label="漏洞名称" min-width="180" show-overflow-tooltip />
         <el-table-column prop="rule_id" label="规则" width="140" />
-        <el-table-column prop="target_ip" label="目标" width="140" />
+        <el-table-column prop="target_ip" label="目标" width="130" />
         <el-table-column label="状态" width="100">
           <template #default="{ row }">
-            <el-tag :type="taskStatusType(row.status)" size="small">{{ row.status }}</el-tag>
+            <el-tag :type="taskStatusType(row.status)" size="small">{{ taskStatusLabel(row.status) }}</el-tag>
           </template>
         </el-table-column>
         <el-table-column prop="created_at" label="创建时间" width="170" />
@@ -80,6 +81,11 @@ function taskStatusType(s) {
   if (s === 'failed') return 'danger'
   if (s === 'running') return 'warning'
   return 'info'
+}
+
+function taskStatusLabel(s) {
+  const m = { success: '成功', failed: '失败', running: '执行中', pending: '等待中' }
+  return m[s] || s
 }
 
 function showDetail(id) {

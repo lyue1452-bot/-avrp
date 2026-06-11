@@ -9,15 +9,21 @@ import sys
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
-from config import PLAYBOOKS_DIR, ANSIBLE_TIMEOUT, PROJECT_ROOT
-from remediation.rules import RemediationRule
+from config import PLAYBOOKS_DIR, ANSIBLE_TIMEOUT, PROJECT_ROOT, ANSIBLE_USER, SIMULATE_ON_WINDOWS
+from remediation.rules import RemediationRule, get_playbook_for_target
+from remediation.target_os import detect_target_os
 
-# auto | wsl | native | simulate
-_ANSIBLE_MODE_ENV = os.environ.get("RAYSCAN_ANSIBLE_MODE", "auto").lower()
 # Windows 无 Ansible 时默认演示修复（可通过 RAYSCAN_SIMULATE_ON_WINDOWS=0 关闭）
-SIMULATE_ON_WINDOWS = os.environ.get("RAYSCAN_SIMULATE_ON_WINDOWS", "1") != "0"
 
 _RUNTIME_CACHE: Optional[dict] = None
+
+
+def _ansible_mode_env() -> str:
+    return os.environ.get("RAYSCAN_ANSIBLE_MODE", "auto").lower()
+
+
+def _simulate_on_windows() -> bool:
+    return SIMULATE_ON_WINDOWS or os.environ.get("RAYSCAN_SIMULATE_ON_WINDOWS", "0") == "1"
 
 
 def _clear_runtime_cache() -> None:
@@ -33,9 +39,6 @@ def get_ansible_runtime(force_refresh: bool = False) -> dict:
     if _RUNTIME_CACHE is None:
         _RUNTIME_CACHE = ansible_runtime_info()
     return _RUNTIME_CACHE
-
-
-def ansible_runtime_info() -> dict:
 
 
 def is_windows() -> bool:
@@ -97,37 +100,32 @@ def ansible_runtime_info() -> dict:
     native_ok, native_msg = _test_ansible_native()
     wsl_ok, wsl_msg = _test_ansible_wsl() if is_windows() else (False, "")
 
-    if _ANSIBLE_MODE_ENV == "simulate":
+    mode_env = _ansible_mode_env()
+    sim_win = _simulate_on_windows()
+
+    if mode_env == "simulate":
         return {
             "available": True,
             "mode": "simulate",
             "label": "演示模式（不连接目标）",
             "detail": native_msg,
         }
-    if _ANSIBLE_MODE_ENV == "wsl" and wsl_ok:
-        return {"available": True, "mode": "wsl", "label": "WSL Ansible", "detail": wsl_msg}
-    if _ANSIBLE_MODE_ENV == "native" and native_ok:
+    if mode_env == "wsl" and wsl_ok:
+        return {"available": True, "mode": "wsl", "label": "WSL Ansible（真实修复）", "detail": wsl_msg}
+    if mode_env == "native" and native_ok:
         return {"available": True, "mode": "native", "label": "Native Ansible", "detail": native_msg}
 
     if is_windows():
-        # auto 模式默认演示修复，避免 Windows 原生/WSL Ansible SSH 连不上远程目标导致全部 failed
-        if _ANSIBLE_MODE_ENV == "auto" and SIMULATE_ON_WINDOWS:
-            return {
-                "available": True,
-                "mode": "simulate",
-                "label": "演示模式（Windows 默认，模拟修复成功）",
-                "detail": "设置 RAYSCAN_ANSIBLE_MODE=wsl 可连接真实目标执行 Ansible",
-            }
         if wsl_ok:
-            return {"available": True, "mode": "wsl", "label": "WSL Ansible（推荐）", "detail": wsl_msg}
+            return {"available": True, "mode": "wsl", "label": "WSL Ansible（真实修复）", "detail": wsl_msg}
         if native_ok:
             return {"available": True, "mode": "native", "label": "Native Ansible", "detail": native_msg}
-        if SIMULATE_ON_WINDOWS:
+        if sim_win:
             return {
                 "available": True,
                 "mode": "simulate",
-                "label": "演示模式（Windows 无 Ansible，模拟修复）",
-                "detail": "设置 RAYSCAN_ANSIBLE_MODE=wsl 并安装 WSL Ansible 可连接真实目标",
+                "label": "演示模式（需显式开启）",
+                "detail": "设置 RAYSCAN_SIMULATE_ON_WINDOWS=1 或 RAYSCAN_ANSIBLE_MODE=simulate 才启用",
             }
         return {
             "available": False,
@@ -151,16 +149,39 @@ def ansible_available() -> bool:
 
 
 def _resolve_mode() -> str:
-    info = get_ansible_runtime()
-    if _ANSIBLE_MODE_ENV == "simulate":
+    mode_env = _ansible_mode_env()
+    info = get_ansible_runtime(force_refresh=True)
+    if mode_env == "simulate":
         return "simulate"
-    if _ANSIBLE_MODE_ENV in ("wsl", "native"):
-        if info["available"]:
-            return _ANSIBLE_MODE_ENV
-        if info["mode"] == "simulate":
-            return "simulate"
+    # 显式要求 wsl/native 时绝不回退演示模式
+    if mode_env == "wsl":
+        return "wsl" if info.get("mode") == "wsl" or wsl_available() else "none"
+    if mode_env == "native":
+        return "native" if info.get("mode") == "native" else "none"
+    if mode_env == "auto":
+        if is_windows() and wsl_available():
+            wsl_ok, _ = _test_ansible_wsl()
+            if wsl_ok:
+                return "wsl"
+        if info.get("mode") in ("wsl", "native"):
+            return info["mode"]
         return "none"
-    return info["mode"] if info["available"] else "none"
+    mode = info.get("mode")
+    if mode == "simulate" and not _simulate_on_windows() and mode_env != "simulate":
+        return "none"
+    return mode if info.get("available") and mode != "simulate" else "none"
+
+
+def _connection_extra_vars(asset_ip: str) -> Dict:
+    """注入 ansible_user 等连接参数。"""
+    extra: Dict = {}
+    user = ANSIBLE_USER or os.environ.get("USERNAME", "")
+    if user:
+        extra["ansible_user"] = user
+    if detect_target_os(asset_ip) == "windows":
+        extra["ansible_shell_type"] = "cmd"
+        extra["ansible_become"] = "false"
+    return extra
 
 
 def _build_playbook_cmd(
@@ -170,18 +191,22 @@ def _build_playbook_cmd(
     use_wsl: bool,
 ) -> List[str]:
     pb = to_wsl_path(playbook) if use_wsl else str(playbook)
+    merged = dict(_connection_extra_vars(asset_ip))
+    if extra_vars:
+        merged.update(extra_vars)
     inner = [
         "ansible-playbook",
         pb,
         "-i", f"{asset_ip},",
         "--ssh-common-args", "-o StrictHostKeyChecking=no",
     ]
-    if extra_vars:
-        for k, v in extra_vars.items():
-            if isinstance(v, (list, dict, bool)):
-                inner.extend(["-e", f"{k}={json.dumps(v)}"])
-            else:
-                inner.extend(["-e", f"{k}={v}"])
+    for k, v in merged.items():
+        if isinstance(v, (list, dict, bool)):
+            inner.extend(["-e", f"{k}={json.dumps(v)}"])
+        elif isinstance(v, str) and (" " in v or "=" in v):
+            inner.extend(["-e", f"{k}={json.dumps(v)}"])
+        else:
+            inner.extend(["-e", f"{k}={v}"])
 
     if not use_wsl:
         return inner
@@ -231,7 +256,8 @@ def run_playbook(
     asset_ip: str,
     extra_vars: Optional[Dict] = None,
 ) -> Tuple[bool, str]:
-    playbook = PLAYBOOKS_DIR / rule.playbook
+    pb_rel = get_playbook_for_target(rule, asset_ip)
+    playbook = PLAYBOOKS_DIR / pb_rel
     if not playbook.exists():
         return False, f"剧本不存在: {playbook}"
 
@@ -241,13 +267,19 @@ def run_playbook(
         return False, info["detail"]
 
     if mode == "simulate":
+        os_label = detect_target_os(asset_ip)
         return True, (
-            f"[演示模式] 已模拟修复 {asset_ip} | 规则: {rule.rule_id} | "
-            f"剧本: {rule.playbook}（未实际 SSH 连接目标，Windows 本地演示用）"
+            f"[演示模式] 已模拟修复 {asset_ip} ({os_label}) | 规则: {rule.rule_id} | "
+            f"剧本: {pb_rel}（未实际连接目标；请用 .\\scripts\\start_real_ansible.ps1 启动后端）"
         )
 
     use_wsl = mode == "wsl"
+    runtime = get_ansible_runtime()
     cmd = _build_playbook_cmd(playbook, asset_ip, extra_vars, use_wsl=use_wsl)
+    ansible_cfg = PROJECT_ROOT / "ansible.cfg"
+    env = os.environ.copy()
+    if ansible_cfg.exists():
+        env["ANSIBLE_CONFIG"] = str(ansible_cfg)
 
     try:
         result = subprocess.run(
@@ -258,11 +290,14 @@ def run_playbook(
             cwd=str(PLAYBOOKS_DIR) if not use_wsl else str(PROJECT_ROOT),
             encoding="utf-8",
             errors="replace",
+            env=env,
         )
         output = _clean_output((result.stdout or "") + (result.stderr or ""))
         output = _friendly_error_message(output, asset_ip)
         output = _truncate_output(output, max_len=800)
-        prefix = "[WSL] " if use_wsl else ""
+        prefix = f"[真实修复 | {runtime.get('label', mode)}] "
+        if use_wsl:
+            prefix = f"[真实修复 | WSL Ansible] "
         if result.returncode == 0:
             return True, prefix + (output or "执行成功")
         return False, prefix + (output or f"退出码 {result.returncode}")

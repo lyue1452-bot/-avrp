@@ -13,7 +13,7 @@
           <el-tag :type="severityType(vuln.severity)" size="small">{{ vuln.severity }}</el-tag>
         </el-descriptions-item>
         <el-descriptions-item label="状态">
-          <el-tag :type="statusType(vuln.fix_status)" size="small">{{ vuln.fix_status }}</el-tag>
+          <el-tag :type="statusType(vuln.fix_status)" size="small">{{ vuln.fix_status_label || fixStatusLabel(vuln.fix_status) }}</el-tag>
         </el-descriptions-item>
         <el-descriptions-item label="CVE" :span="2">{{ vuln.cve || '-' }}</el-descriptions-item>
         <el-descriptions-item label="修复规则" :span="2">{{ vuln.remediation_rule || '-' }}</el-descriptions-item>
@@ -23,8 +23,11 @@
         <el-descriptions-item label="修复建议" :span="2">
           <div class="desc-box">{{ vuln.solution || '-' }}</div>
         </el-descriptions-item>
-        <el-descriptions-item label="最近修复日志" :span="2">
-          <div class="desc-box">{{ vuln.last_fix_msg || '-' }}</div>
+        <el-descriptions-item v-if="vuln.has_fix_log" label="最近修复日志" :span="2">
+          <div class="desc-box">{{ vuln.last_fix_msg }}</div>
+        </el-descriptions-item>
+        <el-descriptions-item v-if="displayVerifyHint(vuln)" label="验证建议" :span="2">
+          <div class="desc-box verify-hint">{{ vuln.verify_hint || buildVerifyHint(vuln) }}</div>
         </el-descriptions-item>
       </el-descriptions>
 
@@ -42,6 +45,8 @@
 import { ref, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { vulnAPI } from '../../api/auth'
+import { fixStatusLabel, fixStatusType } from '../../utils/fixStatus'
+import { buildVerifyHint } from '../../utils/verifyHint'
 import { ElMessage, ElMessageBox } from 'element-plus'
 
 const route = useRoute()
@@ -64,14 +69,19 @@ function severityType(s) {
   return 'info'
 }
 function statusType(s) {
-  if (s === 'fixed') return 'success'
-  if (s === 'failed') return 'danger'
-  if (s === 'fixing') return 'warning'
-  return 'info'
+  return fixStatusType(s)
+}
+
+function displayVerifyHint(row) {
+  return !!(row?.verify_hint || row?.remediation_rule || row?.auto_fixable)
 }
 
 async function fixVuln() {
   fixing.value = true
+  if (vuln.value) {
+    vuln.value.fix_status = 'fixing'
+    vuln.value.fix_status_label = fixStatusLabel('fixing')
+  }
   try {
     const res = await vulnAPI.fix(route.params.id)
     ElMessage({ type: res.ok ? 'success' : 'error', message: res.msg })
@@ -95,4 +105,5 @@ async function showDelete() {
 
 <style scoped>
 .desc-box { white-space: pre-wrap; max-height: 300px; overflow-y: auto; font-size: 13px; line-height: 1.6; }
+.verify-hint { font-family: Consolas, monospace; font-size: 12px; color: #606266; }
 </style>

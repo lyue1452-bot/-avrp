@@ -1,0 +1,14 @@
+---
+- name: Windows 目标连通性检查
+  hosts: all
+  gather_facts: no
+  tasks:
+    - name: PowerShell 连通测试
+      raw: |
+        if (Test-Connection -ComputerName localhost -Count 1 -Quiet) {
+          Write-Output 'HOST_REACHABLE'
+        } else {
+          Write-Output 'HOST_UNREACHABLE'
+          exit 1
+        }
+      changed_when: false

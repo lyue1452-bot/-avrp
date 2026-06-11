@@ -20,6 +20,7 @@ from models import (
 from adapters import parse_report
 from remediation.rules import classify_record, REMEDIATION_RULES
 from remediation.fix_runner import run_batch_fix_for_host
+from remediation.reclassify import reclassify_vulnerabilities
 from scanner.target_utils import parse_scan_target, is_windows, tool_available, resolve_tool_cmd
 from scanner.web_probe import scan_web_target, write_probe_report, BUILTIN_WEB_SCANNER
 from scanner.weakpass_probe import probe_weak_services
@@ -51,7 +52,11 @@ TOOL_LABELS = {
 
 
 def _records_to_stats(records, tool: str, target: str) -> dict:
-    stats = {"total": len(records), "inserted": 0, "updated": 0, "auto_fixable": 0}
+    stats = {
+        "total": len(records), "inserted": 0, "updated": 0,
+        "auto_fixable": 0, "needs_fix": 0, "already_fixed": 0,
+    }
+    from models import get_connection
     for rec in records:
         if not rec.source_tool or rec.source_tool in ("unknown", "generic"):
             rec.source_tool = tool
@@ -61,6 +66,19 @@ def _records_to_stats(records, tool: str, target: str) -> dict:
             stats["auto_fixable"] += 1
         result = upsert_vulnerability(rec, remediation_rule=rule_id, auto_fixable=auto)
         stats[result] = stats.get(result, 0) + 1
+        if auto and rec.fingerprint:
+            conn = get_connection()
+            row = conn.execute(
+                "SELECT fix_status FROM vulnerabilities WHERE fingerprint=?",
+                (rec.fingerprint,),
+            ).fetchone()
+            conn.close()
+            if row:
+                st = row["fix_status"] or "pending"
+                if st == "fixed":
+                    stats["already_fixed"] += 1
+                elif st in ("auto_fixable", "pending", "failed", "fixing"):
+                    stats["needs_fix"] += 1
     return stats
 
 
@@ -261,51 +279,9 @@ SCANNER_RUNNERS: Dict[str, Callable] = {
 ALL_TOOLS = list(SCANNER_RUNNERS.keys())
 
 
-def _run_auto_fix(target: str, stats: dict) -> dict:
-    fix_stats = {"total": stats.get("auto_fixable", 0), "fixed": 0, "failed": 0, "skipped": 0}
-    if not ansible_available():
-        fix_stats["skipped"] = fix_stats["total"]
-        fix_stats["msg"] = "Ansible 不可用，跳过自动修复"
-        return fix_stats
-
+def _run_auto_fix(target: str, created_by: str = "scan") -> dict:
     host, _, _, _ = parse_scan_target(target)
-    reclassify_vulnerabilities(asset_ip=host)
-
-    from models import get_connection, update_fix_status
-    conn = get_connection()
-    conn.execute(
-        "UPDATE vulnerabilities SET fix_status='auto_fixable' "
-        "WHERE asset_ip=? AND auto_fixable=1 AND fix_status='failed'",
-        (host,),
-    )
-    conn.commit()
-    rows = conn.execute(
-        "SELECT * FROM vulnerabilities "
-        "WHERE asset_ip=? AND auto_fixable=1 AND fix_status IN ('auto_fixable','pending','failed')",
-        (host,),
-    ).fetchall()
-    conn.close()
-
-    fix_stats["total"] = len(rows)
-    runtime = ansible_runtime_info()
-
-    for row in rows:
-        rule_id = row["remediation_rule"]
-        rule = next((r for r in REMEDIATION_RULES if r.rule_id == rule_id), None)
-        if not rule:
-            fix_stats["skipped"] += 1
-            continue
-        extra = extra_vars_to_cli(build_extra_vars(row))
-        ok, output = run_playbook(rule, row["asset_ip"], extra_vars=extra)
-        if runtime.get("mode") == "simulate":
-            output = f"[{runtime['label']}] {output}"
-        status = "fixed" if ok else "failed"
-        update_fix_status(row["id"], status, output)
-        if ok:
-            fix_stats["fixed"] += 1
-        else:
-            fix_stats["failed"] += 1
-    return fix_stats
+    return run_batch_fix_for_host(host, created_by=created_by or "scan")
 
 
 def _determine_tools(target: str, preferred: List[str]) -> List[str]:
@@ -343,6 +319,8 @@ def start_scan(target: str, tools: Optional[List[str]] = None,
 
 def _run_scan_worker(job_id: int, target: str, tools: List[str], auto_fix: bool):
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    job = get_scan_job(job_id)
+    created_by = (job or {}).get("created_by") or "scan"
     try:
         update_scan_job(job_id, status="running", started_at=now)
         progress = {t: "pending" for t in tools}
@@ -376,17 +354,12 @@ def _run_scan_worker(job_id: int, target: str, tools: List[str], auto_fix: bool)
                 else:
                     progress[tool] = "completed"
                     job_results[tool] = stats
-                    if auto_fix and stats.get("auto_fixable", 0) > 0:
-                        fix = _run_auto_fix(target, stats)
-                        part = (
-                            f"{TOOL_LABELS.get(tool, tool)}: 发现 {stats['total']} 条, "
-                            f"自动修复 {fix.get('fixed', 0)}/{fix.get('total', 0)} 条"
-                        )
-                    else:
-                        part = (
-                            f"{TOOL_LABELS.get(tool, tool)}: 发现 {stats['total']} 条, "
-                            f"可自动修复 {stats.get('auto_fixable', 0)} 条"
-                        )
+                    part = (
+                        f"{TOOL_LABELS.get(tool, tool)}: 发现 {stats['total']} 条, "
+                        f"待修复 {stats.get('needs_fix', stats.get('auto_fixable', 0))} 条"
+                    )
+                    if stats.get("already_fixed"):
+                        part += f"（已修复 {stats['already_fixed']} 条）"
                     summary_parts.append(part)
 
             except subprocess.TimeoutExpired:
@@ -415,6 +388,16 @@ def _run_scan_worker(job_id: int, target: str, tools: List[str], auto_fix: bool)
         finish_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         host, _, _, _ = parse_scan_target(target)
         reclassify_vulnerabilities(asset_ip=host)
+
+        if auto_fix:
+            fix = _run_auto_fix(target, created_by=created_by)
+            fix_part = f"自动修复汇总: 成功 {fix.get('fixed', 0)}/{fix.get('total', 0)} 条"
+            if fix.get("msg"):
+                fix_part += f"（{fix['msg']}）"
+            summary_parts.append(fix_part)
+            job_results["auto_fix"] = fix
+            update_scan_job(job_id, progress=progress, results=dict(**job_results))
+
         update_scan_job(job_id, status="completed", summary=" | ".join(summary_parts), finished_at=finish_time)
 
     except Exception as e:

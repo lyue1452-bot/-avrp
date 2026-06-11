@@ -134,6 +134,7 @@ def upsert_vulnerability(
 
     fields = asdict(record)
     if row:
+        # 更新扫描字段，保留 fix_status / last_fix_msg（已修复不因重扫重置）
         set_clause = """
             UPDATE vulnerabilities SET
                 vuln_name=?, severity=?, asset_ip=?, port=?, url=?,
@@ -192,15 +193,18 @@ def update_fix_status(vuln_id: int, status: str, msg: str = "") -> None:
     conn = get_connection()
     c = conn.cursor()
     cols = _table_columns(c)
+    stored_msg = msg[:4000] if msg else ""
+    if status == "fixed" and stored_msg and "真实修复" not in stored_msg[:120]:
+        stored_msg = f"[真实修复|SUCCESS]\n{stored_msg}"
     if "updated_at" in cols:
         c.execute(
             "UPDATE vulnerabilities SET fix_status=?, last_fix_msg=?, updated_at=datetime('now') WHERE id=?",
-            (status, msg[:500], vuln_id),
+            (status, stored_msg, vuln_id),
         )
     else:
         c.execute(
             "UPDATE vulnerabilities SET fix_status=?, last_fix_msg=? WHERE id=?",
-            (status, msg[:500], vuln_id),
+            (status, stored_msg, vuln_id),
         )
     conn.commit()
     conn.close()
@@ -422,18 +426,23 @@ def get_task(task_id: int) -> Optional[sqlite3.Row]:
 
 
 def list_tasks(page: int = 1, per_page: int = 20, status: str = "") -> tuple:
-    """返回 (rows, total)"""
+    """返回 (rows, total)，含漏洞名称。"""
     conn = get_connection()
     c = conn.cursor()
     where = "WHERE 1=1"
     params = []
     if status:
-        where += " AND status = ?"
+        where += " AND t.status = ?"
         params.append(status)
-    total = c.execute(f"SELECT COUNT(*) FROM tasks {where}", params).fetchone()[0]
+    total = c.execute(
+        f"SELECT COUNT(*) FROM tasks t {where}", params,
+    ).fetchone()[0]
     offset = (page - 1) * per_page
     rows = c.execute(
-        f"SELECT * FROM tasks {where} ORDER BY id DESC LIMIT ? OFFSET ?",
+        f"""SELECT t.*, v.vuln_name, v.severity, v.fix_status AS vuln_fix_status
+            FROM tasks t
+            LEFT JOIN vulnerabilities v ON t.vuln_id = v.id
+            {where} ORDER BY t.id DESC LIMIT ? OFFSET ?""",
         params + [per_page, offset],
     ).fetchall()
     conn.close()

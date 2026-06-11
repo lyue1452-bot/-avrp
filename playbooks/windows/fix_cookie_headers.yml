@@ -1,0 +1,40 @@
+---
+- name: Windows Cookie 安全属性（Apache）
+  hosts: all
+  gather_facts: no
+  tasks:
+    - name: 写入 Cookie 头加固片段
+      raw: |
+        $snippet = @'
+        <IfModule headers_module>
+          Header edit Set-Cookie ^(.*)$ "$1; HttpOnly; Secure; SameSite=Lax"
+        </IfModule>
+        '@
+        $roots = @('C:\xampp\apache\conf','C:\Apache24\conf')
+        foreach ($root in $roots) {
+          if (-not (Test-Path $root)) { continue }
+          $extra = Join-Path $root 'extra'
+          if (-not (Test-Path $extra)) { New-Item -ItemType Directory -Path $extra -Force | Out-Null }
+          $conf = Join-Path $extra 'rayscan-cookie-headers.conf'
+          Set-Content -Path $conf -Value $snippet -Encoding UTF8
+          $httpd = Join-Path $root 'httpd.conf'
+          if (Test-Path $httpd) {
+            $inc = 'Include conf/extra/rayscan-cookie-headers.conf'
+            $text = Get-Content $httpd -Raw
+            if ($text -notmatch [regex]::Escape('rayscan-cookie-headers.conf')) {
+              Add-Content -Path $httpd -Value "`n$inc"
+            }
+            Write-Output "Cookie headers config: $conf"
+          }
+        }
+      changed_when: true
+
+    - name: 重启 Apache
+      raw: |
+        foreach ($n in @('Apache2.4','Apache','xamppapache')) {
+          if (Get-Service -Name $n -ErrorAction SilentlyContinue) {
+            Restart-Service $n -Force -ErrorAction SilentlyContinue
+          }
+        }
+      changed_when: false
+      failed_when: false

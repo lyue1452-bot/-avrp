@@ -2,11 +2,9 @@
 from flask import Blueprint, request, jsonify
 from flask_jwt_extended import jwt_required
 
-from models import list_tasks, get_task, delete_task, update_task_status
+from models import list_tasks, get_task, delete_task, get_vulnerability
 from remediation.rules import REMEDIATION_RULES
-from remediation.executor import run_playbook
-from remediation.verify import verify_fix
-from config import VERIFY_AFTER_FIX
+from remediation.fix_runner import run_vuln_fix, retry_existing_task
 
 tasks_bp = Blueprint("tasks", __name__, url_prefix="/tasks")
 
@@ -27,7 +25,12 @@ def task_detail(task_id):
     row = get_task(task_id)
     if not row:
         return jsonify({"ok": False, "msg": "任务不存在"}), 404
-    return jsonify({"ok": True, "data": dict(row)})
+    data = dict(row)
+    vuln = get_vulnerability(row["vuln_id"]) if row["vuln_id"] else None
+    if vuln:
+        data["vuln_name"] = vuln["vuln_name"]
+        data["severity"] = vuln["severity"]
+    return jsonify({"ok": True, "data": data})
 
 
 @tasks_bp.route("/<int:task_id>", methods=["DELETE"])
@@ -50,13 +53,9 @@ def task_retry(task_id):
     if not rule:
         return jsonify({"ok": False, "msg": "修复规则已不存在"}), 400
 
-    update_task_status(task_id, "running")
-    ok, output = run_playbook(rule, row["target_ip"])
+    vuln = get_vulnerability(row["vuln_id"])
+    if not vuln:
+        return jsonify({"ok": False, "msg": "关联漏洞不存在"}), 404
 
-    if ok and VERIFY_AFTER_FIX:
-        v_ok, v_msg = verify_fix(rule, row["target_url"] or "", row["target_ip"])
-        output += f"\n验证: {v_msg}"
-
-    status = "success" if ok else "failed"
-    update_task_status(task_id, status, output)
-    return jsonify({"ok": ok, "msg": "重试完成", "task_id": task_id})
+    ok, output = retry_existing_task(row, vuln, rule)
+    return jsonify({"ok": ok, "msg": "重试完成" if ok else "重试失败", "task_id": task_id, "output": output[:500]})

@@ -12,8 +12,8 @@
           </el-select>
         </el-col>
         <el-col :span="4">
-          <el-select v-model="statusFilter" placeholder="修复状态" clearable @change="loadData" style="width:100%">
-            <el-option v-for="s in filters.fix_status" :key="s" :label="s" :value="s" />
+            <el-select v-model="statusFilter" placeholder="修复状态" clearable @change="loadData" style="width:100%">
+            <el-option v-for="s in statusOptions" :key="s.value" :label="s.label" :value="s.value" />
           </el-select>
         </el-col>
         <el-col :span="4">
@@ -49,13 +49,13 @@
         <el-table-column prop="cve" label="CVE" width="120" />
         <el-table-column prop="fix_status" label="状态" width="100">
           <template #default="{ row }">
-            <el-tag :type="statusType(row.fix_status)" size="small">{{ row.fix_status }}</el-tag>
+            <el-tag :type="statusType(row.fix_status)" size="small">{{ row.fix_status_label || fixStatusLabel(row.fix_status) }}</el-tag>
           </template>
         </el-table-column>
         <el-table-column label="操作" width="180" fixed="right">
           <template #default="{ row }">
             <el-button size="small" @click="showDetail(row.id)">详情</el-button>
-            <el-button size="small" type="danger" @click="fixOne(row.id)">修复</el-button>
+            <el-button size="small" type="danger" :disabled="row.fix_status === 'fixing'" :loading="fixingId === row.id" @click="fixOne(row.id)">修复</el-button>
           </template>
         </el-table-column>
       </el-table>
@@ -81,7 +81,7 @@
             <el-tag :type="severityType(detail.severity)" size="small">{{ detail.severity }}</el-tag>
           </el-descriptions-item>
           <el-descriptions-item label="状态">
-            <el-tag :type="statusType(detail.fix_status)" size="small">{{ detail.fix_status }}</el-tag>
+            <el-tag :type="statusType(detail.fix_status)" size="small">{{ detail.fix_status_label || fixStatusLabel(detail.fix_status) }}</el-tag>
           </el-descriptions-item>
           <el-descriptions-item label="CVE" :span="2">{{ detail.cve || '-' }}</el-descriptions-item>
           <el-descriptions-item label="CWE" :span="2">{{ detail.cwe || '-' }}</el-descriptions-item>
@@ -89,7 +89,12 @@
           <el-descriptions-item label="修复规则" :span="2">{{ detail.remediation_rule || '-' }}</el-descriptions-item>
           <el-descriptions-item label="描述" :span="2"><div class="desc-text">{{ detail.description || '-' }}</div></el-descriptions-item>
           <el-descriptions-item label="修复建议" :span="2"><div class="desc-text">{{ detail.solution || '-' }}</div></el-descriptions-item>
-          <el-descriptions-item label="最近修复日志" :span="2"><div class="desc-text">{{ detail.last_fix_msg || '-' }}</div></el-descriptions-item>
+          <el-descriptions-item v-if="detail.has_fix_log" label="最近修复日志" :span="2">
+            <div class="desc-text">{{ detail.last_fix_msg }}</div>
+          </el-descriptions-item>
+          <el-descriptions-item v-if="displayVerifyHint(detail)" label="验证建议" :span="2">
+            <div class="desc-text verify-hint">{{ detail.verify_hint || buildVerifyHint(detail) }}</div>
+          </el-descriptions-item>
         </el-descriptions>
       </template>
     </el-dialog>
@@ -98,8 +103,10 @@
 
 <script setup>
 import { ref, onMounted } from 'vue'
-import { vulnAPI } from '../../api/auth'
 import { ElMessage, ElMessageBox } from 'element-plus'
+import { vulnAPI } from '../../api/auth'
+import { fixStatusLabel, fixStatusType } from '../../utils/fixStatus'
+import { buildVerifyHint } from '../../utils/verifyHint'
 
 const vulns = ref([])
 const loading = ref(false)
@@ -110,10 +117,12 @@ const search = ref('')
 const severityFilter = ref('')
 const statusFilter = ref('')
 const filters = ref({ severity: [], fix_status: [] })
+const statusOptions = ref([])
 const selectedIds = ref([])
 const detailVisible = ref(false)
 const detail = ref(null)
 const reclassifying = ref(false)
+const fixingId = ref(null)
 
 onMounted(loadData)
 
@@ -131,6 +140,7 @@ async function loadData() {
       vulns.value = res.data
       total.value = res.total
       filters.value = res.filters
+      statusOptions.value = res.filters?.fix_status || []
     }
   } finally {
     loading.value = false
@@ -163,11 +173,11 @@ function severityType(s) {
 }
 
 function statusType(s) {
-  if (s === 'fixed') return 'success'
-  if (s === 'failed') return 'danger'
-  if (s === 'fixing') return 'warning'
-  if (s === 'auto_fixable') return ''
-  return 'info'
+  return fixStatusType(s)
+}
+
+function displayVerifyHint(row) {
+  return !!(row?.verify_hint || row?.remediation_rule || row?.auto_fixable)
 }
 
 async function showDetail(id) {
@@ -189,13 +199,32 @@ async function reclassifyAll() {
   }
 }
 
+function setRowFixStatus(id, status) {
+  const row = vulns.value.find(v => v.id === id)
+  if (row) {
+    row.fix_status = status
+    row.fix_status_label = fixStatusLabel(status)
+  }
+}
+
 async function fixOne(id) {
   try {
     await ElMessageBox.confirm('确认执行自动修复？', '提示')
+  } catch {
+    return
+  }
+  fixingId.value = id
+  setRowFixStatus(id, 'fixing')
+  try {
     const res = await vulnAPI.fix(id)
     ElMessage({ type: res.ok ? 'success' : 'error', message: res.msg })
-    if (res.ok) loadData()
-  } catch { /* cancel */ }
+    await loadData()
+  } catch (e) {
+    ElMessage.error(e?.response?.data?.msg || e?.message || '修复请求失败')
+    await loadData()
+  } finally {
+    fixingId.value = null
+  }
 }
 
 async function batchFix() {
@@ -211,4 +240,5 @@ async function batchFix() {
 
 <style scoped>
 .desc-text { white-space: pre-wrap; max-height: 200px; overflow-y: auto; font-size: 13px; line-height: 1.6; }
+.verify-hint { font-family: Consolas, monospace; font-size: 12px; color: #606266; }
 </style>

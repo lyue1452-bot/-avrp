@@ -1,0 +1,8 @@
+---
+- name: Windows 登录接口 Apache 层防护
+  hosts: all
+  gather_facts: no
+  tasks:
+    - name: 部署登录路径限速与读超时
+      raw: powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File D:/rayscan/scripts/win_fix/login_rate_limit.ps1
+      changed_when: true

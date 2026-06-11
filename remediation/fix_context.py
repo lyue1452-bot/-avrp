@@ -27,11 +27,9 @@ def build_extra_vars(row) -> Dict:
         extra["allow_remote"] = False
 
     if rule_id in ("open_port_exposure", "weak_password", "database_misconfig", "ssh_hardening"):
-        disallowed = []
         if port and port not in (80, 443):
-            disallowed.append(port)
-        if disallowed:
-            extra["disallowed_ports"] = disallowed
+            extra["block_port"] = port
+            extra["disallowed_ports"] = [port]
         if rule_id == "open_port_exposure":
             extra["close_unlisted"] = False
             extra["allowed_ports"] = [22, 80, 443]

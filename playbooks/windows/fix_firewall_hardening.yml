@@ -1,0 +1,50 @@
+---
+# Windows 防火墙 — 阻断非必要入站端口（PowerShell + OpenSSH）
+- name: Windows 防火墙端口加固
+  hosts: all
+  gather_facts: no
+  vars:
+    allowed_ports: [80, 443]
+    disallowed_ports: []
+    block_port: 0
+  tasks:
+    - name: 确保 Windows 防火墙已启用
+      raw: |
+        Set-NetFirewallProfile -Profile Domain,Public,Private -Enabled True
+      changed_when: false
+
+    - name: 阻断高风险入站端口
+      raw: |
+        $ports = @()
+        $extra = {{ disallowed_ports | default([]) | to_json }}
+        if ($extra -is [string]) { $extra = $extra | ConvertFrom-Json }
+        if ($null -ne $extra) { $ports += @($extra) }
+        $bp = {{ block_port | default(0) | int }}
+        if ($bp -gt 0) { $ports += $bp }
+        $ports = $ports | Select-Object -Unique
+        foreach ($p in $ports) {
+          if (-not $p -or $p -in 80,443) { continue }
+          $name = "RayScan-Block-In-TCP-$p"
+          if (-not (Get-NetFirewallRule -DisplayName $name -ErrorAction SilentlyContinue)) {
+            New-NetFirewallRule -DisplayName $name -Direction Inbound -Action Block -Protocol TCP -LocalPort $p | Out-Null
+            Write-Output "Blocked inbound TCP $p"
+          } else {
+            Write-Output "Rule already exists for TCP $p"
+          }
+        }
+      changed_when: true
+
+    - name: 放行 Web 端口（可选）
+      raw: |
+        $ports = @({{ allowed_ports | default([80,443]) | join(',') }})
+        foreach ($p in $ports) {
+          $name = "RayScan-Allow-In-TCP-$p"
+          if (-not (Get-NetFirewallRule -DisplayName $name -ErrorAction SilentlyContinue)) {
+            New-NetFirewallRule -DisplayName $name -Direction Inbound -Action Allow -Protocol TCP -LocalPort $p | Out-Null
+          }
+        }
+      changed_when: false
+
+    - name: 完成
+      raw: Write-Output "Windows firewall rules applied"
+      changed_when: false
